@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>原神成就统计</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 登录界面 -->
+  <div id="login-page" class="page active">
+    <div class="login-container">
+      <div class="login-logo">
+        <div class="logo-icon">★</div>
+        <h1>原神成就统计</h1>
+        <p class="subtitle">记录你的提瓦特之旅</p>
+      </div>
+      <div class="login-form">
+        <label for="uid-input">输入你的 UID</label>
+        <input type="text" id="uid-input" placeholder="请输入 UID（如 123456789）" maxlength="10">
+        <button id="login-btn" class="btn-primary">登录</button>
+        <p id="login-error" class="error-msg"></p>
+      </div>
+      <div class="saved-accounts" id="saved-accounts">
+        <p class="saved-title">已保存的账号</p>
+        <div id="accounts-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="main-page" class="page">
+    <!-- 顶部导航栏 -->
+    <header class="header">
+      <div class="header-left">
+        <span class="header-logo">★</span>
+        <h2>原神成就统计</h2>
+      </div>
+      <div class="header-right">
+        <div class="user-info">
+          <span class="uid-label">UID:</span>
+          <span id="current-uid" class="uid-value"></span>
+        </div>
+        <button id="export-btn" class="btn-secondary">导出文本</button>
+        <button id="logout-btn" class="btn-outline">退出登录</button>
+      </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <div class="main-content">
+      <!-- 左侧搜索和统计 -->
+      <aside class="sidebar">
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="搜索成就名称...">
+          <span class="search-icon">🔍</span>
+        </div>
+        <div class="stats-card">
+          <h3>成就进度</h3>
+          <div class="stats-bar">
+            <div class="stats-progress" id="stats-progress"></div>
+          </div>
+          <div class="stats-text">
+            <span id="stats-completed">0</span> / <span id="stats-total">0</span>
+          </div>
+          <div class="stats-percent" id="stats-percent">0%</div>
+        </div>
+        <div class="category-stats" id="category-stats">
+          <!-- 分类统计动态生成 -->
+        </div>
+      </aside>
+
+      <!-- 右侧成就列表 -->
+      <main class="achievement-area">
+        <div class="achievement-header">
+          <h3>成就列表</h3>
+          <div class="header-actions">
+            <button id="expand-all" class="btn-small">全部展开</button>
+            <button id="collapse-all" class="btn-small">全部折叠</button>
+          </div>
+        </div>
+        <div id="achievement-list" class="achievement-list">
+          <!-- 成就动态生成 -->
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 搜索结果显示 -->
+  <div id="search-results" class="search-results" style="display:none;">
+    <div class="search-results-header">
+      <h3>搜索结果</h3>
+      <button id="close-search" class="btn-small">关闭</button>
+    </div>
+    <div id="search-list"></div>
+  </div>
+
+  <!-- 导出弹窗 -->
+  <div id="export-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>导出成就进度</h3>
+        <button id="close-modal" class="btn-close">×</button>
+      </div>
+      <textarea id="export-text" readonly></textarea>
+      <div class="modal-footer">
+        <button id="copy-btn" class="btn-primary">复制到剪贴板</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
