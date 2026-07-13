@@ -56,7 +56,7 @@ function calcStats(data) {
     for (const [, items] of Object.entries(catData.children)) {
       items.forEach(item => {
         total++; catTotal++;
-        if (data[item.name]) { completed++; catCompleted++; }
+        if (data[item.key]) { completed++; catCompleted++; }
       });
     }
     catStats[category] = { total: catTotal, completed: catCompleted };
@@ -139,7 +139,7 @@ function renderAchievements(filterText = '') {
     for (const [, items] of Object.entries(catData.children)) {
       for (const item of items) {
         catTotal++;
-        if (data[item.name]) catCompleted++;
+        if (data[item.key]) catCompleted++;
       }
     }
 
@@ -169,7 +169,7 @@ function renderAchievements(filterText = '') {
       }
 
       let subCompleted = 0;
-      for (const item of items) { if (data[item.name]) subCompleted++; }
+      for (const item of items) { if (data[item.key]) subCompleted++; }
 
       html += `<div class="sub-category" data-sub="${subName}">
         <div class="sub-category-header">
@@ -186,16 +186,16 @@ function renderAchievements(filterText = '') {
 
       // Sort: uncompleted first, completed last (keep relative order)
       const itemsToRender = (filterText ? filteredItems : items).slice().sort((a, b) => {
-        const aDone = !!data[a.name];
-        const bDone = !!data[b.name];
+        const aDone = !!data[a.key];
+        const bDone = !!data[b.key];
         if (aDone === bDone) return 0;
         return aDone ? 1 : -1;
       });
 
       for (const item of itemsToRender) {
-        const isDone = !!data[item.name];
+        const isDone = !!data[item.key];
         html += `<div class="achievement-item${isDone ? ' completed' : ''}">
-          <input type="checkbox" class="achievement-checkbox" data-name="${item.name}" ${isDone ? 'checked' : ''}>
+          <input type="checkbox" class="achievement-checkbox" data-key="${item.key}" ${isDone ? 'checked' : ''}>
           <div class="achievement-info">
             <div class="achievement-name">${item.name}</div>
             <div class="achievement-desc">${item.desc}</div>
@@ -239,16 +239,14 @@ function bindAchievementEvents(container) {
     subCb.addEventListener('change', () => {
       const subDiv = subCb.closest('.sub-category');
       const checkItems = subDiv.querySelectorAll('.achievement-checkbox');
-      const items = [];
-      checkItems.forEach((cb, i) => {
+      checkItems.forEach((cb) => {
         cb.checked = subCb.checked;
-        const name = cb.dataset.name;
-        items.push(name);
+        const key = cb.dataset.key;
         if (subCb.checked) {
-          userAchievements[currentUid][name] = true;
+          userAchievements[currentUid][key] = true;
           cb.closest('.achievement-item').classList.add('completed');
         } else {
-          delete userAchievements[currentUid][name];
+          delete userAchievements[currentUid][key];
           cb.closest('.achievement-item').classList.remove('completed');
         }
       });
@@ -259,15 +257,15 @@ function bindAchievementEvents(container) {
     });
   });
 
-  // Individual achievement checkbox
+  // Individual achievement checkbox (each independent)
   container.querySelectorAll('.achievement-checkbox').forEach(cb => {
     cb.addEventListener('change', () => {
-      const name = cb.dataset.name;
+      const key = cb.dataset.key;
       if (cb.checked) {
-        userAchievements[currentUid][name] = true;
+        userAchievements[currentUid][key] = true;
         cb.closest('.achievement-item').classList.add('completed');
       } else {
-        delete userAchievements[currentUid][name];
+        delete userAchievements[currentUid][key];
         cb.closest('.achievement-item').classList.remove('completed');
       }
       saveAchievements(currentUid, userAchievements[currentUid]);
@@ -314,15 +312,28 @@ function updateStats() {
   document.getElementById('stats-progress').style.width = `${stats.total > 0 ? (stats.completed / stats.total * 100) : 0}%`;
 
   const catStatsDiv = document.getElementById('category-stats');
-  let catHtml = '<h3 style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">分类进度</h3>';
+  let catHtml = '<h3 style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:8px;">分类导航（点击跳转）</h3>';
   for (const [cat, stat] of Object.entries(stats.catStats)) {
     const percent = stat.total > 0 ? Math.round(stat.completed / stat.total * 100) : 0;
-    catHtml += `<div class="category-stat-item">
-      <span class="cat-name">${window.ACHIEVEMENTS_DATA[cat].icon} ${cat}</span>
+    catHtml += `<div class="category-stat-item directory-link" data-target="${cat}" style="cursor:pointer;">
+      <span class="cat-name" style="cursor:pointer;">${window.ACHIEVEMENTS_DATA[cat].icon} ${cat}</span>
       <span class="cat-progress">${stat.completed}/${stat.total} (${percent}%)</span>
     </div>`;
   }
   catStatsDiv.innerHTML = catHtml;
+
+  // Click to scroll
+  catStatsDiv.querySelectorAll('.directory-link').forEach(item => {
+    item.addEventListener('click', () => {
+      const target = item.dataset.target;
+      const card = document.querySelector(`.category-card[data-category="${target}"]`);
+      if (card) {
+        card.querySelector('.sub-categories')?.classList.add('expanded');
+        card.querySelector('.category-header .chevron')?.classList.add('expanded');
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
 }
 
 // ========== 搜索功能 ==========
@@ -346,9 +357,9 @@ function initSearch() {
       } else {
         let html = '';
         for (const r of results) {
-          const isDone = !!userAchievements[currentUid][r.name];
+          const isDone = !!userAchievements[currentUid][r.key];
           html += `<div class="search-result-item">
-            <input type="checkbox" ${isDone ? 'checked' : ''} data-name="${r.name}" style="accent-color:var(--blue-500);">
+            <input type="checkbox" ${isDone ? 'checked' : ''} data-key="${r.key}" style="accent-color:var(--blue-500);">
             <div style="flex:1;min-width:0;">
               <div class="search-result-name">${r.name}</div>
               <div class="search-result-desc">${r.desc}</div>
@@ -361,11 +372,11 @@ function initSearch() {
         // Bind checkbox events
         searchList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
           cb.addEventListener('change', () => {
-            const name = cb.dataset.name;
+            const key = cb.dataset.key;
             if (cb.checked) {
-              userAchievements[currentUid][name] = true;
+              userAchievements[currentUid][key] = true;
             } else {
-              delete userAchievements[currentUid][name];
+              delete userAchievements[currentUid][key];
             }
             saveAchievements(currentUid, userAchievements[currentUid]);
             renderAchievements();
@@ -409,7 +420,7 @@ function initExport() {
       for (const [subName, items] of Object.entries(catData.children)) {
         text += `  ▸ ${subName}:\n`;
         for (const item of items) {
-          const done = userAchievements[currentUid][item.name] ? '✓' : '✗';
+          const done = userAchievements[currentUid][item.key] ? '✓' : '✗';
           text += `    [${done}] ${item.name} — ${item.desc}\n`;
         }
         text += `\n`;
