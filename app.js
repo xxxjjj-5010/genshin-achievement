@@ -184,7 +184,14 @@ function renderAchievements(filterText = '') {
         </div>
         <div class="achievement-items">`;
 
-      const itemsToRender = filterText ? filteredItems : items;
+      // Sort: uncompleted first, completed last (keep relative order)
+      const itemsToRender = (filterText ? filteredItems : items).slice().sort((a, b) => {
+        const aDone = !!data[a.name];
+        const bDone = !!data[b.name];
+        if (aDone === bDone) return 0;
+        return aDone ? 1 : -1;
+      });
+
       for (const item of itemsToRender) {
         const isDone = !!data[item.name];
         html += `<div class="achievement-item${isDone ? ' completed' : ''}">
