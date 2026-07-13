@@ -41,11 +41,10 @@
 }
 .marquee-content {
   display: inline-block;
-  padding-left: 100%;
-  animation: marquee 20s linear infinite;
+  animation: marquee 15s linear infinite;
 }
 @keyframes marquee {
-  0% { transform: translateX(0); }
+  0% { transform: translateX(100vw); }
   100% { transform: translateX(-100%); }
 }
 
@@ -408,6 +407,14 @@ body {
 .cat-name { color: var(--gray-600); }
 .cat-progress {
   font-weight: 600;
+  color: var(--blue-600);
+}
+
+/* 分类导航跳转 */
+.directory-link:hover {
+  background: var(--blue-50);
+}
+.directory-link:hover .cat-name {
   color: var(--blue-600);
 }
 
