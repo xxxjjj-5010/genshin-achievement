@@ -1,10 +1,13 @@
 // ============================================================
 // 原神成就统计 - 核心逻辑
-// 升级版 2026-09-18
+// 升级版 2026-09-21
 //   · 成就 key 改用游戏内稳定 id（旧版「文件::合辑::序号」会随版本更新整体错位）
 //   · 自动把旧的已保存进度迁移到新键位，进度不丢
 //   · 新增：只看未完成 / 只看已完成 / 隐藏隐藏成就
 //   · 新增：原石统计、数据版本显示、JSON 备份与恢复
+//   · 新增：合辑进度总览（按差最少/剩原石/完成率排序，点击跳转）
+//   · 新增：今日推荐 5 个未完成成就（按日期+UID 确定性随机，原石优先）
+//   · 新增：成就行内「攻略」一键搜索、「7.0 新增」徽章与「只看新增」筛选
 //   · 修复：重复登录导致事件重复绑定、删除账号无二次确认、子分类全选计数错误
 // ============================================================
 
@@ -202,13 +205,15 @@ function ensureFilterBar() {
     `<button class="btn-filter active" data-filter="all">全部</button>` +
     `<button class="btn-filter" data-filter="undone">只看未完成</button>` +
     `<button class="btn-filter" data-filter="done">只看已完成</button>` +
-    `<label class="filter-check"><input type="checkbox" id="hide-hidden"> 隐藏「隐藏成就」</label>`;
+    `<button class="btn-filter" data-filter="new" title="只看最近版本新加入的成就">只看新增</button>` +
+    `<label class="filter-check"><input type="checkbox" id="hide-hidden"> 隐藏「隐藏成就」</label>` +
+    `<button class="btn-filter overview-toggle" id="overview-btn" title="按合辑查看完成度，快速查漏补缺">📊 合辑总览</button>`;
   area.parentNode.insertBefore(bar, area.nextSibling);
 
-  bar.querySelectorAll('.btn-filter').forEach(btn => {
+  bar.querySelectorAll('.btn-filter[data-filter]').forEach(btn => {
     btn.addEventListener('click', () => {
       viewFilter = btn.dataset.filter;
-      bar.querySelectorAll('.btn-filter').forEach(b => b.classList.toggle('active', b === btn));
+      bar.querySelectorAll('.btn-filter[data-filter]').forEach(b => b.classList.toggle('active', b === btn));
       renderAchievements();
     });
   });
@@ -216,6 +221,7 @@ function ensureFilterBar() {
     hideHidden = e.target.checked;
     renderAchievements();
   });
+  bar.querySelector('#overview-btn').addEventListener('click', openOverview);
 }
 
 // ========== 渲染成就列表 ==========
@@ -226,11 +232,16 @@ function renderAchievements(filterText = '') {
 
   for (const [category, catData] of Object.entries(window.ACHIEVEMENTS_DATA)) {
     // 合辑层统计永远按全量算，不随筛选变化
-    let catTotal = 0, catCompleted = 0;
+    let catTotal = 0, catCompleted = 0, catNew = 0, catMaxV = 0, catMaxVStr = '';
     for (const [, items] of Object.entries(catData.children)) {
       for (const item of items) {
         catTotal++;
         if (data[item.key]) catCompleted++;
+        if (item.v) {
+          catNew++;
+          const v = parseFloat(item.v);
+          if (v > catMaxV) { catMaxV = v; catMaxVStr = item.v; }
+        }
       }
     }
 
@@ -243,6 +254,7 @@ function renderAchievements(filterText = '') {
       if (filterText) shown = shown.filter(item => (item.name || '').includes(filterText) || (item.desc || '').includes(filterText));
       if (viewFilter === 'undone') shown = shown.filter(item => !data[item.key]);
       else if (viewFilter === 'done') shown = shown.filter(item => !!data[item.key]);
+      else if (viewFilter === 'new') shown = shown.filter(item => !!item.v);
       if (hideHidden) shown = shown.filter(item => !item.hidden);
       if (shown.length === 0) continue;
       catVisible += shown.length;
@@ -276,15 +288,18 @@ function renderAchievements(filterText = '') {
         const isDone = !!data[item.key];
         const blocked = !!BLOCKED[item.key];
         const badges =
+          (item.v ? `<span class="badge badge-new">${item.v}新增</span>` : '') +
           (item.hidden ? '<span class="badge badge-hidden">隐藏</span>' : '') +
           (blocked ? `<span class="badge badge-blocked" title="${BLOCKED[item.key]}">暂不可完成</span>` : '') +
           (item.reward ? `<span class="badge badge-reward">${item.reward}</span>` : '');
+        const guideUrl = 'https://www.bing.com/search?q=' + encodeURIComponent(`原神 成就 攻略 ${item.name}`);
         inner += `<div class="achievement-item${isDone ? ' completed' : ''}${blocked ? ' blocked' : ''}">
           <input type="checkbox" class="achievement-checkbox" data-key="${item.key}" ${isDone ? 'checked' : ''}>
           <div class="achievement-info">
             <div class="achievement-name">${item.name}${badges}</div>
             <div class="achievement-desc">${item.desc}</div>
           </div>
+          <a class="guide-link" target="_blank" rel="noopener" title="搜索这个成就的攻略" href="${guideUrl}">攻略</a>
         </div>`;
       }
 
@@ -298,8 +313,9 @@ function renderAchievements(filterText = '') {
     html += `<div class="category-header">
       <div class="category-header-left">
         <span class="category-icon">${catData.icon}</span>
-        <span class="category-title">${category}</span>
-        <span class="category-count">${catCompleted}/${catTotal}</span>
+        <span class="category-title">${category}</span>` +
+      (catNew > 0 ? `<span class="badge badge-new-cat">${catMaxVStr}新增${catNew < catTotal ? '·' + catNew + '项' : ''}</span>` : '') +
+      `<span class="category-count">${catCompleted}/${catTotal}</span>
       </div>
       <div class="category-header-right">
         <span class="category-progress-text">${pct(catCompleted, catTotal)}%</span>
@@ -452,15 +468,168 @@ function updateStats() {
   catStatsDiv.innerHTML = catHtml;
 
   catStatsDiv.querySelectorAll('.directory-link').forEach(item => {
-    item.addEventListener('click', () => {
-      const target = item.dataset.target;
-      const card = document.querySelector(`.category-card[data-category="${target}"]`);
-      if (card) {
-        card.querySelector('.sub-categories')?.classList.add('expanded');
-        card.querySelector('.category-header .chevron')?.classList.add('expanded');
-        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+    item.addEventListener('click', () => jumpToCategory(item.dataset.target));
+  });
+
+  renderDailyPicks();
+}
+
+// ========== 跳转 ==========
+function jumpToCategory(category) {
+  const card = document.querySelector(`.category-card[data-category="${category}"]`);
+  if (!card) return;
+  card.querySelector('.sub-categories')?.classList.add('expanded');
+  card.querySelector('.category-header .chevron')?.classList.add('expanded');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function jumpToItem(key) {
+  // 目标成就可能被当前筛选隐藏 → 先回到「全部」视图再定位
+  const bar = document.getElementById('filter-bar');
+  if (viewFilter !== 'all') {
+    viewFilter = 'all';
+    bar?.querySelectorAll('.btn-filter[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+    renderAchievements();
+  }
+  const cb = document.querySelector(`.achievement-checkbox[data-key="${key}"]`);
+  if (!cb) return;
+  const itemEl = cb.closest('.achievement-item');
+  const sub = cb.closest('.sub-category');
+  const card = cb.closest('.category-card');
+  card?.querySelector('.sub-categories')?.classList.add('expanded');
+  card?.querySelector('.category-header .chevron')?.classList.add('expanded');
+  sub?.querySelector('.achievement-items')?.classList.add('expanded');
+  sub?.querySelector('.sub-category-header .chevron')?.classList.add('expanded');
+  itemEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  itemEl.classList.remove('flash');
+  void itemEl.offsetWidth; // 强制重排以重启动画
+  itemEl.classList.add('flash');
+}
+
+// ========== 合辑进度总览 ==========
+let overviewSort = 'closest';
+
+function openOverview() {
+  let modal = document.getElementById('overview-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'overview-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content overview-content">
+        <div class="modal-header">
+          <h3>合辑进度总览</h3>
+          <button class="btn-close" id="close-overview">×</button>
+        </div>
+        <div class="overview-tabs">
+          <button class="ov-tab active" data-sort="closest">差最少完成</button>
+          <button class="ov-tab" data-sort="reward">剩原石最多</button>
+          <button class="ov-tab" data-sort="rate">完成率最低</button>
+        </div>
+        <div class="overview-list" id="overview-list"></div>
+        <div class="overview-foot">点击任意合辑可跳转过去 · 已完成的自动沉底</div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#close-overview').addEventListener('click', () => { modal.style.display = 'none'; });
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+    modal.querySelectorAll('.ov-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        overviewSort = tab.dataset.sort;
+        modal.querySelectorAll('.ov-tab').forEach(t => t.classList.toggle('active', t === tab));
+        renderOverview();
+      });
     });
+  }
+  renderOverview();
+  modal.style.display = 'flex';
+}
+
+function renderOverview() {
+  const listEl = document.getElementById('overview-list');
+  if (!listEl) return;
+  const data = userAchievements[currentUid] || {};
+  const rows = [];
+  for (const [category, catData] of Object.entries(window.ACHIEVEMENTS_DATA)) {
+    let total = 0, completed = 0, rewardLeft = 0;
+    for (const [, items] of Object.entries(catData.children)) {
+      items.forEach(item => {
+        total++;
+        if (data[item.key]) completed++;
+        else rewardLeft += item.reward || 0;
+      });
+    }
+    rows.push({ category, icon: catData.icon, total, completed, left: total - completed, rewardLeft, pctv: pct(completed, total) });
+  }
+  const isDone = r => r.completed >= r.total;
+  if (overviewSort === 'closest') rows.sort((a, b) => (isDone(a) - isDone(b)) || (a.left - b.left) || (b.rewardLeft - a.rewardLeft));
+  else if (overviewSort === 'reward') rows.sort((a, b) => (isDone(a) - isDone(b)) || (b.rewardLeft - a.rewardLeft) || (a.left - b.left));
+  else rows.sort((a, b) => (isDone(a) - isDone(b)) || (a.pctv - b.pctv) || (a.left - b.left));
+
+  listEl.innerHTML = rows.map(r => `
+    <div class="ov-row" data-category="${r.category}">
+      <div class="ov-name" title="${r.category}">${r.icon} ${r.category}</div>
+      <div class="ov-bar"><div class="ov-bar-fill" style="width:${r.pctv}%"></div></div>
+      <div class="ov-num">${r.completed}/${r.total}</div>
+      <div class="ov-reward" title="完成剩余成就可得原石">${r.left > 0 ? '剩 ' + r.rewardLeft + ' 原石' : '✓'}</div>
+    </div>`).join('');
+  listEl.querySelectorAll('.ov-row').forEach(row => {
+    row.addEventListener('click', () => {
+      document.getElementById('overview-modal').style.display = 'none';
+      jumpToCategory(row.dataset.category);
+    });
+  });
+}
+
+// ========== 今日推荐 ==========
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function renderDailyPicks() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  let card = document.getElementById('daily-card');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'daily-card';
+    card.className = 'daily-card';
+    const catStats = document.getElementById('category-stats');
+    sidebar.insertBefore(card, catStats);
+  }
+  const d = new Date();
+  const dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const data = userAchievements[currentUid] || {};
+  const undone = allAchievementList.filter(a => !data[a.key] && !a.hidden && !BLOCKED[a.key]);
+
+  let html = `<h3>今日推荐</h3><div class="daily-sub">${dateStr} · 未完成里原石最多的挑 5 个</div>`;
+  if (undone.length === 0) {
+    html += '<div class="daily-empty">没有待完成的成就了，全成就达成！</div>';
+  } else {
+    // 候选池：原石最多的前 30 个，按「日期+UID」洗牌 —— 每天稳定换一批，同一天内不变
+    const pool = undone.slice().sort((a, b) => (b.reward || 0) - (a.reward || 0)).slice(0, 30);
+    let seed = 0;
+    const s = dateStr + '#' + currentUid;
+    for (let i = 0; i < s.length; i++) seed = (seed * 131 + s.charCodeAt(i)) >>> 0;
+    const rnd = mulberry32(seed);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    html += pool.slice(0, 5).map(p => `
+      <div class="daily-item" data-key="${p.key}" title="${p.desc}">
+        <span class="daily-name">${p.name}</span>
+        <span class="daily-reward">${p.reward || 0}</span>
+      </div>`).join('');
+  }
+  card.innerHTML = html;
+  card.querySelectorAll('.daily-item').forEach(el => {
+    el.addEventListener('click', () => jumpToItem(el.dataset.key));
   });
 }
 
@@ -493,7 +662,7 @@ function initSearch() {
           html += `<div class="search-result-item${isDone ? ' completed' : ''}">
             <input type="checkbox" ${isDone ? 'checked' : ''} data-key="${r.key}">
             <div style="flex:1;min-width:0;">
-              <div class="search-result-name">${r.name}${r.hidden ? '<span class="badge badge-hidden">隐藏</span>' : ''}${blocked ? '<span class="badge badge-blocked">暂不可完成</span>' : ''}</div>
+              <div class="search-result-name">${r.name}${r.v ? `<span class="badge badge-new">${r.v}新增</span>` : ''}${r.hidden ? '<span class="badge badge-hidden">隐藏</span>' : ''}${blocked ? '<span class="badge badge-blocked">暂不可完成</span>' : ''}</div>
               <div class="search-result-desc">${r.desc}</div>
             </div>
             <span class="search-result-category">${r.category}</span>
