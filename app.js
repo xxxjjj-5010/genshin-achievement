@@ -9,6 +9,13 @@
 //   · 新增：今日推荐 5 个未完成成就（按日期+UID 确定性随机，原石优先）
 //   · 新增：成就行内「攻略」一键搜索、「7.0 新增」徽章与「只看新增」筛选
 //   · 修复：重复登录导致事件重复绑定、删除账号无二次确认、子分类全选计数错误
+// 自动导入版 2026-09-21（第三轮）
+//   · 新增：UIAF 成就文件导入（一次导入全部进度，含完成时间，符合 UIAF v1.1）
+//   · 新增：UIAF 导出（可把进度带去椰羊 / Paimon.moe / 胡桃等工具）
+//   · 新增：合辑卡片「整组完成 / 整组清空」批量勾选
+//   · 新增：搜索结果「全部标记完成」
+//   · 新增：批量操作「撤销」（导入和批量勾选都可一键还原）
+//   · 新增：记录每一条成就的完成时间，为后续「最近完成」等功能预留
 // ============================================================
 
 let currentUid = null;
@@ -18,6 +25,19 @@ let allAchievementList = []; // Flat list for search
 // 视图筛选状态
 let viewFilter = 'all';      // all | undone | done
 let hideHidden = false;      // 是否隐藏「隐藏成就」
+
+// 完成时间记录：key -> 毫秒时间戳（与 userAchievements 分开存，兼容旧数据）
+let doneTimes = {};
+
+// 批量操作快照，用于「撤销」
+let lastSnapshot = null;
+let toastTimer = null;
+
+// 当前搜索结果对应的成就 key（供「全部标记完成」使用）
+let currentSearchKeys = [];
+
+// UIAF 规范：无法识别完成时间时使用的占位值（253402271999 秒 = 9999-12-31 23:59:59）
+const UIAF_SENTINEL = 253402271999;
 
 // 当前版本暂时无法达成的成就（不计入「可完成」分母）
 // ⚠️ 每次版本更新后请复核这份名单
@@ -29,7 +49,13 @@ const BLOCKED = {
 
 // ========== 工具函数 ==========
 function getStorageKey(uid) { return `genshin_achievements_${uid}`; }
+function getTimesKey(uid) { return `genshin_achievement_times_${uid}`; }
 function getAccountsKey() { return `genshin_accounts`; }
+
+// 插入到 HTML 之前先转义，避免文件里的怪字符把页面搞坏
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 // 旧版键位（wonders_of_the_world::天地万象::0）→ 新键位（成就 id）
 function migrateKeys(data) {
@@ -57,12 +83,38 @@ function loadAchievements(uid) {
   return data;
 }
 
+function loadTimes(uid) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getTimesKey(uid)) || '{}');
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch (e) { return {}; }
+}
+
 function saveAchievements(uid, data) {
   localStorage.setItem(getStorageKey(uid), JSON.stringify(data));
   const accounts = getAccounts();
   if (!accounts.includes(uid)) {
     accounts.push(uid);
     localStorage.setItem(getAccountsKey(), JSON.stringify(accounts));
+  }
+}
+
+// 进度 + 完成时间一起落盘（所有改动进度的路径都走这里）
+function persist() {
+  saveAchievements(currentUid, userAchievements[currentUid] || {});
+  try { localStorage.setItem(getTimesKey(currentUid), JSON.stringify(doneTimes)); } catch (e) { /* 超额就放弃记录时间，不影响进度 */ }
+}
+
+// 统一的勾选入口：on=true 标记完成并记时间；on=false 取消并抹掉时间
+function setDone(key, on, ts) {
+  if (!key) return;
+  const cur = userAchievements[currentUid] || (userAchievements[currentUid] = {});
+  if (on) {
+    cur[key] = true;
+    doneTimes[key] = ts || doneTimes[key] || Date.now();
+  } else {
+    delete cur[key];
+    delete doneTimes[key];
   }
 }
 
@@ -75,6 +127,51 @@ function removeAccount(uid) {
   const accounts = getAccounts().filter(id => id !== uid);
   localStorage.setItem(getAccountsKey(), JSON.stringify(accounts));
   localStorage.removeItem(getStorageKey(uid));
+  localStorage.removeItem(getTimesKey(uid));
+}
+
+// ========== 批量操作：快照与撤销 ==========
+function snapshot(label) {
+  lastSnapshot = {
+    label: label || '批量操作',
+    data: Object.assign({}, userAchievements[currentUid] || {}),
+    times: Object.assign({}, doneTimes),
+  };
+}
+
+function undoLast() {
+  if (!lastSnapshot) return;
+  const label = lastSnapshot.label;
+  userAchievements[currentUid] = Object.assign({}, lastSnapshot.data);
+  doneTimes = Object.assign({}, lastSnapshot.times);
+  lastSnapshot = null;
+  persist();
+  renderAchievements();
+  updateStats();
+  const el = document.getElementById('toast');
+  if (el) {
+    el.querySelector('#toast-msg').textContent = `已撤销：${label}`;
+    el.querySelector('#toast-undo').style.display = 'none';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+  }
+}
+
+function showToast(msg) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    el.innerHTML = `<span id="toast-msg"></span><button class="toast-undo" id="toast-undo">撤销</button>`;
+    document.body.appendChild(el);
+    el.querySelector('#toast-undo').addEventListener('click', undoLast);
+  }
+  el.querySelector('#toast-msg').textContent = msg;
+  el.querySelector('#toast-undo').style.display = lastSnapshot ? '' : 'none';
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 12000);
 }
 
 // Build flat achievement list for search
@@ -87,6 +184,13 @@ function buildAchievementList() {
       });
     }
   }
+}
+
+function knownKeySet() {
+  if (!allAchievementList.length) buildAchievementList();
+  const set = new Set();
+  allAchievementList.forEach(a => set.add(a.key));
+  return set;
 }
 
 // ========== 统计计算 ==========
@@ -161,7 +265,9 @@ function initLoginPage() {
     loginError.textContent = '';
     currentUid = uid;
     userAchievements[currentUid] = loadAchievements(uid);
-    saveAchievements(currentUid, userAchievements[currentUid]);
+    doneTimes = loadTimes(uid);
+    lastSnapshot = null;
+    persist();
     showMainPage();
   }
 
@@ -182,6 +288,7 @@ function showMainPage() {
   document.getElementById('current-uid').textContent = currentUid;
   buildAchievementList();
   ensureFilterBar();
+  ensureHeaderImportBtn();
   renderAchievements();
   updateStats();
 }
@@ -190,7 +297,21 @@ function showLoginPage() {
   document.getElementById('main-page').classList.remove('active');
   document.getElementById('login-page').classList.add('active');
   document.getElementById('uid-input').value = '';
+  document.getElementById('filter-bar')?.remove();
   currentUid = null;
+}
+
+// 顶栏「导入进度」按钮（动态注入，不改 index.html）
+function ensureHeaderImportBtn() {
+  const right = document.querySelector('.header-right');
+  if (!right || document.getElementById('import-open-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'import-open-btn';
+  btn.className = 'btn-secondary';
+  btn.textContent = '导入进度';
+  btn.title = '从 UIAF 成就文件或本站备份一键导入进度';
+  btn.addEventListener('click', openImportModal);
+  right.insertBefore(btn, document.getElementById('export-btn'));
 }
 
 // ========== 筛选条（动态注入，无需改动 index.html） ==========
@@ -309,6 +430,13 @@ function renderAchievements(filterText = '') {
     // 筛选后该合辑没有可见条目 → 整块不渲染
     if (catVisible === 0) continue;
 
+    const catAllDone = catTotal > 0 && catCompleted === catTotal;
+    const bulkMode = catAllDone ? 'clear' : 'done';
+    const bulkLabel = catAllDone ? '整组清空' : '整组完成';
+    const bulkTitle = catAllDone
+      ? `取消「${category}」全部的勾选（可撤销）`
+      : `把「${category}」里尚未完成的 ${catTotal - catCompleted} 个成就一次性标记为已完成（可撤销）`;
+
     html += `<div class="category-card" data-category="${category}">`;
     html += `<div class="category-header">
       <div class="category-header-left">
@@ -318,6 +446,7 @@ function renderAchievements(filterText = '') {
       `<span class="category-count">${catCompleted}/${catTotal}</span>
       </div>
       <div class="category-header-right">
+        <button class="btn-bulk${catAllDone ? ' is-clear' : ''}" data-cat="${category}" data-mode="${bulkMode}" title="${bulkTitle}">${bulkLabel}</button>
         <span class="category-progress-text">${pct(catCompleted, catTotal)}%</span>
         <span class="chevron">&#9660;</span>
       </div>
@@ -341,6 +470,14 @@ function bindAchievementEvents(container) {
     });
   });
 
+  // 整组完成 / 整组清空（别让它触发合辑折叠）
+  container.querySelectorAll('.btn-bulk').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      bulkCategory(btn.dataset.cat, btn.dataset.mode);
+    });
+  });
+
   // 子分类展开 / 折叠
   container.querySelectorAll('.sub-category-header').forEach(subHeader => {
     subHeader.addEventListener('click', (e) => {
@@ -356,11 +493,8 @@ function bindAchievementEvents(container) {
     subCb.addEventListener('change', () => {
       const subDiv = subCb.closest('.sub-category');
       const keys = (subDiv.dataset.keys || '').split(',').filter(Boolean);
-      keys.forEach(key => {
-        if (subCb.checked) userAchievements[currentUid][key] = true;
-        else delete userAchievements[currentUid][key];
-      });
-      saveAchievements(currentUid, userAchievements[currentUid]);
+      keys.forEach(key => setDone(key, subCb.checked));
+      persist();
       subDiv.querySelectorAll('.achievement-checkbox').forEach(cb => {
         cb.checked = subCb.checked;
         cb.closest('.achievement-item').classList.toggle('completed', subCb.checked);
@@ -375,20 +509,82 @@ function bindAchievementEvents(container) {
   container.querySelectorAll('.achievement-checkbox').forEach(cb => {
     cb.addEventListener('change', () => {
       const key = cb.dataset.key;
-      if (cb.checked) {
-        userAchievements[currentUid][key] = true;
-        cb.closest('.achievement-item').classList.add('completed');
-      } else {
-        delete userAchievements[currentUid][key];
-        cb.closest('.achievement-item').classList.remove('completed');
-      }
-      saveAchievements(currentUid, userAchievements[currentUid]);
+      setDone(key, cb.checked);
+      cb.closest('.achievement-item').classList.toggle('completed', cb.checked);
+      persist();
       const subDiv = cb.closest('.sub-category');
       updateSubCategoryUI(subDiv);
       updateCategoryUI(subDiv.closest('.category-card'));
       updateStats();
     });
   });
+}
+
+// ========== 合辑级批量勾选 ==========
+function bulkCategory(category, mode) {
+  const catData = window.ACHIEVEMENTS_DATA[category];
+  if (!catData) return;
+  const keys = [];
+  for (const items of Object.values(catData.children)) items.forEach(i => keys.push(i.key));
+  if (!keys.length) return;
+
+  const data = userAchievements[currentUid] || {};
+  const toDone = mode !== 'clear';
+  const affected = toDone
+    ? keys.filter(k => !data[k]).length
+    : keys.filter(k => data[k]).length;
+
+  if (affected === 0) {
+    showToast(toDone ? `「${category}」已经全部完成` : `「${category}」还没有任何勾选`);
+    return;
+  }
+
+  if (affected >= 20) {
+    const ok = window.confirm(
+      `确定把「${category}」里${toDone ? '尚未完成的' : '已完成的'} ${affected} 个成就全部${toDone ? '标记为已完成' : '取消勾选'}吗？\n\n` +
+      `这是一次批量操作，完成后可以在页面底部点「撤销」还原。`
+    );
+    if (!ok) return;
+  }
+
+  snapshot(`「${category}」${toDone ? '整组完成' : '整组清空'} ${affected} 条`);
+  keys.forEach(k => setDone(k, toDone));
+  persist();
+  renderAchievements();
+  updateStats();
+  showToast(`已把「${category}」${affected} 个成就${toDone ? '标记为完成' : '取消勾选'}`);
+}
+
+// ========== 搜索结果批量勾选 ==========
+function bulkSearchResults() {
+  const keys = currentSearchKeys.filter(Boolean);
+  if (!keys.length) { showToast('当前没有搜索结果'); return; }
+  const data = userAchievements[currentUid] || {};
+  const todo = keys.filter(k => !data[k]);
+  if (!todo.length) { showToast('这些成就都已经完成了'); return; }
+
+  if (todo.length >= 20) {
+    const ok = window.confirm(
+      `把搜索结果里尚未完成的 ${todo.length} 个成就全部标记为已完成？\n\n` +
+      `这是一次批量操作，完成后可以在页面底部点「撤销」还原。`
+    );
+    if (!ok) return;
+  }
+
+  snapshot(`搜索结果整批完成 ${todo.length} 条`);
+  const todoSet = new Set(todo);
+  todo.forEach(k => setDone(k, true));
+  persist();
+  // 同步搜索结果面板本身的勾选状态
+  document.querySelectorAll('#search-list input[type="checkbox"]').forEach(cb => {
+    if (todoSet.has(cb.dataset.key)) {
+      cb.checked = true;
+      cb.closest('.search-result-item')?.classList.add('completed');
+    }
+  });
+  renderAchievements();
+  updateStats();
+  showToast(`已把搜索结果里 ${todo.length} 个成就标记为完成`);
 }
 
 function updateSubCategoryUI(subDiv) {
@@ -416,6 +612,15 @@ function updateCategoryUI(card) {
   const p = card.querySelector('.category-progress-text');
   if (c) c.textContent = `${completed}/${total}`;
   if (p) p.textContent = `${pct(completed, total)}%`;
+
+  // 顺手把「整组完成 / 整组清空」的按钮状态同步过来
+  const btn = card.querySelector('.btn-bulk');
+  if (btn) {
+    const allDone = total > 0 && completed === total;
+    btn.dataset.mode = allDone ? 'clear' : 'done';
+    btn.textContent = allDone ? '整组清空' : '整组完成';
+    btn.classList.toggle('is-clear', allDone);
+  }
 }
 
 // ========== 更新统计 ==========
@@ -640,17 +845,30 @@ function initSearch() {
   const searchList = document.getElementById('search-list');
   const closeSearch = document.getElementById('close-search');
 
+  // 「全部标记完成」按钮（只注入一次）
+  if (!document.getElementById('search-bulk-done')) {
+    const bulkBtn = document.createElement('button');
+    bulkBtn.id = 'search-bulk-done';
+    bulkBtn.className = 'btn-small';
+    bulkBtn.textContent = '全部标记完成';
+    bulkBtn.title = '把当前搜索结果里尚未完成的成就一次性勾上';
+    bulkBtn.addEventListener('click', bulkSearchResults);
+    const hdr = searchResults.querySelector('.search-results-header');
+    if (hdr) hdr.insertBefore(bulkBtn, closeSearch);
+  }
+
   let searchTimeout;
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
       const text = searchInput.value.trim();
-      if (!text) { searchResults.style.display = 'none'; return; }
+      if (!text) { searchResults.style.display = 'none'; currentSearchKeys = []; return; }
 
       // 命中上限 300 条，避免 98 万字符级结果把页面卡死
       const results = allAchievementList.filter(a =>
         (a.name || '').includes(text) || (a.desc || '').includes(text)
       ).slice(0, 300);
+      currentSearchKeys = results.map(r => r.key);
 
       if (results.length === 0) {
         searchList.innerHTML = '<div class="no-results">没有找到匹配的成就</div>';
@@ -673,12 +891,9 @@ function initSearch() {
         searchList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
           cb.addEventListener('change', () => {
             const key = cb.dataset.key;
-            if (cb.checked) {
-              userAchievements[currentUid][key] = true;
-            } else {
-              delete userAchievements[currentUid][key];
-            }
-            saveAchievements(currentUid, userAchievements[currentUid]);
+            setDone(key, cb.checked);
+            persist();
+            cb.closest('.search-result-item')?.classList.toggle('completed', cb.checked);
             renderAchievements();
             updateStats();
           });
@@ -692,6 +907,7 @@ function initSearch() {
   closeSearch.addEventListener('click', () => {
     searchResults.style.display = 'none';
     searchInput.value = '';
+    currentSearchKeys = [];
     renderAchievements();
   });
 }
@@ -746,31 +962,280 @@ function downloadJSON() {
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 
-function importJSON(file) {
+// ========== UIAF（统一可交换成就格式 v1.1，uigf.org） ==========
+// 导出：把本站进度变成任何成就工具都能读的 UIAF 文件
+function buildUIAF() {
+  if (!allAchievementList.length) buildAchievementList();
+  const data = userAchievements[currentUid] || {};
+  const list = [];
+  for (const a of allAchievementList) {
+    const id = Number(a.key);
+    if (!Number.isFinite(id)) continue; // 只导出游戏原生 id，非数字键跳过
+    const done = !!data[a.key];
+    list.push({
+      id: id,
+      current: done ? 1 : 0,
+      status: done ? 2 : 1,                                  // 1 = 未完成，2 = 已完成
+      timestamp: done ? (doneTimes[a.key] ? Math.floor(doneTimes[a.key] / 1000) : UIAF_SENTINEL) : 0,
+    });
+  }
+  return {
+    info: {
+      export_app: 'genshin-achievement-web',
+      export_app_version: '1.1',
+      uiaf_version: 'v1.1',
+      export_timestamp: Math.floor(Date.now() / 1000),
+    },
+    list: list,
+  };
+}
+
+function downloadUIAF() {
+  const uiaf = buildUIAF();
+  const blob = new Blob([JSON.stringify(uiaf, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `genshin-achievements-${currentUid}-uiaf-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+function isUIAF(payload) {
+  return !!(payload && typeof payload === 'object' && Array.isArray(payload.list));
+}
+
+// UIAF 的 timestamp 是「秒」。0 表示未完成；253402271999 是「已完成但时间未知」的占位
+function uiafTime(t) {
+  const n = Number(t) || 0;
+  if (n > 0 && n < UIAF_SENTINEL) return n * 1000;
+  return Date.now();
+}
+
+// 先算一遍「会新增多少、哪些本站没有」，给用户看清楚再决定
+function planUIAF(payload) {
+  const known = knownKeySet();
+  const data = userAchievements[currentUid] || {};
+  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [] };
+  for (const rec of payload.list) {
+    if (!rec || rec.id === undefined || rec.id === null) continue;
+    plan.total++;
+    const id = String(rec.id);
+    if (!known.has(id)) { plan.unknown.push(id); continue; }
+    const st = Number(rec.status);
+    if (st === 2 || st === 3) {           // 2 = 已完成，3 = 奖励已领取，都算完成
+      plan.finished++;
+      if (data[id]) plan.kept++;
+      else { plan.add++; plan.ids.push([id, uiafTime(rec.timestamp)]); }
+    } else {
+      plan.unfinished++;
+    }
+  }
+  return plan;
+}
+
+function planBackup(payload) {
+  const incoming = payload.data || payload;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    throw new Error('备份文件格式不正确');
+  }
+  const known = knownKeySet();
+  const map = window.LEGACY_KEY_MAP || {};
+  const data = userAchievements[currentUid] || {};
+  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [], fixed: 0 };
+  for (const k of Object.keys(incoming)) {
+    plan.total++;
+    const nk = map[k] || k;
+    if (nk !== k) plan.fixed++;
+    if (!incoming[k]) { plan.unfinished++; continue; }
+    plan.finished++;
+    if (!known.has(nk)) { plan.unknown.push(nk); continue; }
+    if (data[nk]) plan.kept++;
+    else { plan.add++; plan.ids.push([nk, Date.now()]); }
+  }
+  return plan;
+}
+
+// ========== 导入弹窗 ==========
+let pendingImport = null;
+
+function openImportModal() {
+  let modal = document.getElementById('import-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'import-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content import-content">
+        <div class="modal-header">
+          <h3>导入成就进度</h3>
+          <button class="btn-close" id="close-import">×</button>
+        </div>
+        <div class="import-body">
+          <div class="import-intro">
+            支持两种文件：
+            <div class="import-opt"><b>UIAF 成就文件</b>（推荐）—— 用游戏成就导出工具生成，一次导入全部进度，还带完成时间</div>
+            <div class="import-opt"><b>本站备份 JSON</b> —— 就是「导出备份」生成的那个文件</div>
+            <div class="import-tip">导入只做<b>合并</b>：补上你已完成、网站还没勾的，不会取消你已有的进度。</div>
+          </div>
+          <div class="import-pick">
+            <button class="btn-small import-pick-btn" id="pick-file">选择文件…</button>
+            <span class="import-file" id="import-file"></span>
+          </div>
+          <div class="import-report" id="import-report"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-small" id="import-help">UIAF 文件怎么拿？</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#close-import').addEventListener('click', () => { modal.style.display = 'none'; });
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,application/json';
+    fileInput.style.display = 'none';
+    fileInput.id = 'import-file-input';
+    modal.appendChild(fileInput);
+
+    modal.querySelector('#pick-file').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files[0]) handleImportFile(fileInput.files[0]);
+      fileInput.value = '';
+    });
+    modal.querySelector('#import-help').addEventListener('click', showImportHelp);
+  }
+
+  // 每次打开都重置
+  pendingImport = null;
+  const rep = modal.querySelector('#import-report');
+  rep.style.display = 'none';
+  rep.innerHTML = '';
+  modal.querySelector('#import-file').textContent = '';
+  modal.style.display = 'flex';
+}
+
+function handleImportFile(file) {
+  const modal = document.getElementById('import-modal');
+  const rep = modal.querySelector('#import-report');
+  modal.querySelector('#import-file').textContent = file.name;
+  rep.style.display = 'none';
+  rep.innerHTML = '';
+  pendingImport = null;
+
   const reader = new FileReader();
   reader.onload = () => {
+    let payload;
     try {
-      const payload = JSON.parse(reader.result);
-      const incoming = payload.data || payload;
-      if (!incoming || typeof incoming !== 'object') throw new Error('文件格式不正确');
-      const map = window.LEGACY_KEY_MAP || {};
-      let added = 0, fixed = 0;
-      const cur = userAchievements[currentUid] || (userAchievements[currentUid] = {});
-      for (const k of Object.keys(incoming)) {
-        const nk = map[k] || k;
-        if (nk !== k) fixed++;
-        if (!incoming[k]) continue;
-        if (!cur[nk]) { cur[nk] = true; added++; }
-      }
-      saveAchievements(currentUid, cur);
-      renderAchievements();
-      updateStats();
-      alert(`导入完成：新增 ${added} 条已完成记录${fixed ? `（其中 ${fixed} 条已从旧格式自动转换）` : ''}。\n已有进度不会被覆盖，只做合并。`);
+      payload = JSON.parse(reader.result);
     } catch (e) {
-      alert('导入失败：' + e.message);
+      renderImportError('这个文件不是合法的 JSON：' + e.message);
+      return;
     }
+    try {
+      if (isUIAF(payload)) {
+        pendingImport = { kind: 'uiaf', plan: planUIAF(payload), raw: payload };
+      } else if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        pendingImport = { kind: 'backup', plan: planBackup(payload), raw: payload };
+      } else {
+        throw new Error('无法识别这个文件：它既不是 UIAF 成就文件，也不是本站导出的备份。');
+      }
+    } catch (e) {
+      renderImportError(e.message);
+      return;
+    }
+    renderImportReport();
   };
+  reader.onerror = () => renderImportError('读取文件失败，请重试或换一个文件。');
   reader.readAsText(file);
+}
+
+function renderImportError(msg) {
+  pendingImport = null;
+  const rep = document.getElementById('import-report');
+  if (!rep) return;
+  rep.innerHTML = `<div class="report-warn">${esc(msg)}</div>`;
+  rep.style.display = 'block';
+}
+
+function renderImportReport() {
+  const rep = document.getElementById('import-report');
+  if (!rep || !pendingImport) return;
+  const { kind, plan, raw } = pendingImport;
+  const isUiaf = kind === 'uiaf';
+  const appName = isUiaf && raw.info && raw.info.export_app ? raw.info.export_app : '';
+
+  let html = `<div class="report-title">已识别：${isUiaf
+    ? 'UIAF 成就文件' + (appName ? `（来自 ${esc(appName)}）` : '')
+    : '本站备份文件'}</div>`;
+  html += `<div class="report-grid">
+      <div><span>记录条数</span><b>${plan.total}</b></div>
+      <div><span>其中已完成</span><b>${plan.finished}</b></div>
+      <div><span>其中未完成</span><b>${plan.unfinished}</b></div>
+      <div class="hl"><span>将新增</span><b>${plan.add}</b></div>
+    </div>`;
+  if (plan.kept) html += `<div class="report-line">另有 <b>${plan.kept}</b> 条你本来就已完成，保持不动。</div>`;
+  if (!isUiaf && plan.fixed) html += `<div class="report-line">其中 <b>${plan.fixed}</b> 条来自旧版格式，已自动转换到新的稳定键位。</div>`;
+  if (plan.unknown.length) {
+    html += `<div class="report-warn">有 <b>${plan.unknown.length}</b> 条成就本站数据里还没有，已跳过。
+      这说明游戏版本比本站数据更新 —— 等自动同步完成后（每天上午 10 点）再导一次就能补上。<br>
+      样例：${esc(plan.unknown.slice(0, 8).join('、'))}${plan.unknown.length > 8 ? ' …' : ''}</div>`;
+  }
+  if (isUiaf) {
+    html += `<div class="report-note">UIAF 文件本身不含 UID。请确认这份文件确实是 UID <b>${esc(currentUid)}</b> 导出的，否则进度会串号。</div>`;
+  }
+  html += `<button class="btn-primary report-btn" id="confirm-import">${plan.add ? `确认导入（新增 ${plan.add} 条）` : '确认导入'}</button>`;
+
+  rep.innerHTML = html;
+  rep.style.display = 'block';
+  rep.querySelector('#confirm-import').addEventListener('click', applyPendingImport);
+}
+
+function applyPendingImport() {
+  if (!pendingImport) return;
+  const { kind, plan } = pendingImport;
+  const isUiaf = kind === 'uiaf';
+  const applied = plan.add;
+
+  snapshot(isUiaf ? '导入 UIAF' : '导入备份');
+  for (const pair of plan.ids) setDone(pair[0], true, pair[1]);
+  persist();
+  pendingImport = null;
+
+  renderAchievements();
+  updateStats();
+
+  const rep = document.getElementById('import-report');
+  if (rep) {
+    rep.innerHTML = `<div class="report-title">导入完成</div>
+      <div class="report-line">新增 <b>${applied}</b> 条已完成记录${plan.kept ? `，${plan.kept} 条保持原样` : ''}${plan.unknown.length ? `，跳过 ${plan.unknown.length} 条本站未收录` : ''}。</div>
+      <div class="report-line">左侧进度条已经更新。</div>
+      <button class="btn-small report-btn" id="close-import-after">关闭</button>`;
+    const b = rep.querySelector('#close-import-after');
+    if (b) b.addEventListener('click', () => { document.getElementById('import-modal').style.display = 'none'; });
+  }
+
+  showToast(`已从${isUiaf ? ' UIAF ' : '备份'}导入 ${applied} 条已完成记录`);
+}
+
+function showImportHelp() {
+  window.alert(
+    'UIAF 文件怎么拿？\n\n' +
+    '1. 下载「YaeAchievement」—— 开源免费的成就导出工具（Windows）\n' +
+    '2. 先确保原神没有在运行，然后双击打开它，它会自动帮你把游戏启动起来\n' +
+    '3. 正常登录进游戏，工具会自动读取你的全部成就；读完后游戏会自动退出\n' +
+    '4. 在它列出的导出目标里选「UIAF JSON File」，得到一个 .json 文件\n' +
+    '5. 回到本页，点「选择文件…」把这个 json 导进来\n\n' +
+    '两个要注意的地方：\n' +
+    '· 工具不要和游戏主程序放在同一个文件夹，否则游戏会报「数据异常(31-4302)」\n' +
+    '· 它抓到的数据会缓存 1 小时。如果你有多个账号，可以在缓存有效期内依次登录、\n' +
+    '  分别导出，然后回到本站切换到对应 UID 分别导入\n\n' +
+    'UIAF 是 UIGF 组织制定的通用成就数据标准（uigf.org），本站支持导入也支持导出，\n' +
+    '所以你的进度也可以随时带去椰羊、Paimon.moe、胡桃工具箱等工具。\n\n' +
+    '不想用第三方工具的话，也可以继续手动勾选，或者用每个合辑卡片上的「整组完成」。'
+  );
 }
 
 function initExport() {
@@ -781,33 +1246,22 @@ function initExport() {
   const copyBtn = document.getElementById('copy-btn');
   const footer = exportModal.querySelector('.modal-footer');
 
-  // 备份 / 恢复按钮（动态注入，不改 index.html）
+  // 备份 / UIAF 导出按钮（动态注入，不改 index.html）
   if (footer && !document.getElementById('backup-btn')) {
     const backupBtn = document.createElement('button');
     backupBtn.id = 'backup-btn';
     backupBtn.className = 'btn-small';
     backupBtn.textContent = '导出备份（JSON）';
-    backupBtn.style.marginRight = '8px';
     backupBtn.addEventListener('click', downloadJSON);
 
-    const importBtn = document.createElement('button');
-    importBtn.id = 'import-btn';
-    importBtn.className = 'btn-small';
-    importBtn.textContent = '导入备份';
-    importBtn.style.marginRight = '8px';
+    const uiafBtn = document.createElement('button');
+    uiafBtn.id = 'uiaf-btn';
+    uiafBtn.className = 'btn-small';
+    uiafBtn.textContent = '导出 UIAF';
+    uiafBtn.title = '导出成通用成就格式，可导入椰羊 / Paimon.moe / 胡桃工具箱等';
+    uiafBtn.addEventListener('click', downloadUIAF);
 
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.json,application/json';
-    fileInput.style.display = 'none';
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files && fileInput.files[0]) importJSON(fileInput.files[0]);
-      fileInput.value = '';
-    });
-    importBtn.addEventListener('click', () => fileInput.click());
-
-    footer.insertBefore(fileInput, footer.firstChild);
-    footer.insertBefore(importBtn, footer.firstChild);
+    footer.insertBefore(uiafBtn, footer.firstChild);
     footer.insertBefore(backupBtn, footer.firstChild);
   }
 
