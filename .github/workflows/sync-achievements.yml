@@ -1,0 +1,44 @@
+name: 同步原神成就数据
+
+# 上游 dvaJi/genshin-data 会在游戏版本更新后 1 天内同步（例：7.0 数据 2026-08-11 发布，游戏 08-12 上线），
+# 所以每天跑一次，有新数据就自动提交并部署到 GitHub Pages。
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 02:00（北京时间 10:00）
+  workflow_dispatch:      # 也可以在 Actions 页面手动点一下立刻同步
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 重新生成 data.js
+        run: node tools/build-data.mjs
+
+      - name: 数据无变化就退出
+        id: diff
+        run: |
+          if [ -z "$(git status --porcelain data.js)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "上游数据无变化，跳过提交"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 提交并推送
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.js
+          git commit -m "chore: 同步原神成就数据 $(date -u +%Y-%m-%d)"
+          git push
