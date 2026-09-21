@@ -34,9 +34,8 @@
   padding: 8px 0;
   overflow: hidden;
   white-space: nowrap;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
+  position: relative;
+  z-index: 10;
   box-shadow: 0 2px 8px rgba(59,130,246,0.3);
 }
 .marquee-content {
@@ -604,7 +603,7 @@ body {
   color: var(--gray-300);
 }
 
-/* ========== 搜索高亮 ========== {
+/* ========== 搜索高亮 ========== */
 .highlight {
   background: #fef08a;
   padding: 0 2px;
@@ -627,7 +626,8 @@ body {
 .search-results > div {
   background: var(--white);
   border-radius: var(--radius-lg);
-  width: 500px;
+  width: 500px
+  max-width: calc(100vw - 24px);;
   max-height: 70vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
@@ -698,7 +698,8 @@ body {
 .modal-content {
   background: var(--white);
   border-radius: var(--radius-lg);
-  width: 520px;
+  width: 520px
+  max-width: calc(100vw - 24px);;
   max-height: 70vh;
   display: flex;
   flex-direction: column;
@@ -758,4 +759,103 @@ body {
     width: 90%;
     padding: 32px 24px;
   }
+}
+
+/* ============================================================
+   升级版新增样式
+   ============================================================ */
+
+/* 筛选条 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.btn-filter {
+  padding: 5px 12px;
+  background: var(--white);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-filter:hover { border-color: var(--blue-300); color: var(--blue-600); background: var(--blue-50); }
+.btn-filter.active { background: var(--blue-500); border-color: var(--blue-500); color: var(--white); font-weight: 500; }
+.filter-check {
+  font-size: 12px;
+  color: var(--gray-500);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-check input { accent-color: var(--blue-500); }
+
+/* 成就标签（隐藏 / 暂不可完成 / 原石） */
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 16px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.badge-hidden { background: var(--gray-100); color: var(--gray-500); }
+.badge-blocked { background: #fef3c7; color: #92400e; }
+.badge-reward { background: var(--blue-50); color: var(--blue-600); }
+.achievement-item.blocked .achievement-name { color: var(--gray-500); }
+
+/* 侧栏：原石 / 数据版本 */
+.stats-reward {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--gray-200);
+  font-size: 12px;
+  color: var(--gray-600);
+}
+.stats-reward b { color: var(--blue-600); font-size: 14px; }
+.stats-sub { color: var(--gray-400); margin-left: 4px; }
+.stats-tip { margin-top: 6px; font-size: 11px; color: var(--gray-400); line-height: 1.5; }
+.data-meta {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--gray-200);
+  font-size: 11px;
+  color: var(--gray-400);
+  line-height: 1.7;
+}
+
+/* 导出弹窗底部三个按钮排成一行 */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.modal-footer .btn-primary { width: auto; padding: 7px 16px; margin-top: 0; font-size: 13px; }
+
+/* 搜索结果里的复选框 */
+.search-result-item input[type="checkbox"] {
+  accent-color: var(--blue-500);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.search-result-item.completed .search-result-name { color: var(--gray-400); text-decoration: line-through; }
+
+/* 手机端微调 */
+@media (max-width: 768px) {
+  .achievement-item { padding-left: 34px; padding-right: 12px; }
+  .sub-category-header { padding-left: 24px; }
+  .btn-filter { font-size: 11px; padding: 4px 9px; }
+  .modal-content textarea { min-height: 200px; }
 }
