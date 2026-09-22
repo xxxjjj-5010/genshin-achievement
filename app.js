@@ -16,6 +16,21 @@
 //   · 新增：搜索结果「全部标记完成」
 //   · 新增：批量操作「撤销」（导入和批量勾选都可一键还原）
 //   · 新增：记录每一条成就的完成时间，为后续「最近完成」等功能预留
+// 账号密码版 2026-09-21（第四轮）
+//   · 新增：UID + 自设密码的注册/登录。密码用 PBKDF2-SHA256 + 16 字节随机盐派生 150000 轮，
+//     只存哈希不存明文；无 WebCrypto 环境（file:// 打开）自动切换到纯 JS 同名实现，结果一致
+//   · 新增：顶栏「切换账号」（不离开页面直接换 UID）+「修改密码」（需旧密码）
+//   · 新增：退出登录清除会话；刷新页面不掉线（会话放 sessionStorage）
+//   · 新增：删除账号需要密码验证（原先点一下 × 就删）
+//   · ⚠️ 安全边界：这是「本机锁定」不是服务器级安全。进度数据本身是明文存的，
+//     懂技术的人可直接读浏览器存储绕过密码。用途是防别人顺手翻看 + 防自己输错 UID
+// 导入指引版 2026-09-21（第五轮）
+//   · 新增：导入弹窗里的「具体操作流程」按钮 —— 点开是 7 段分步说明（下载外部工具 /
+//     导出步骤 / 导入步骤 / 多账号 / 常见问题排查表 / 安全边界 / UIAF 是什么）
+//   · 2026-09-22 精简：删掉原来的第 1 段「先确认你的 UID」与第 2 段「在本站登录」，
+//     后面各段编号整体前移；提示语里也去掉了「50MB 的 .pdb 别下」那句
+//   · 新增：导入弹窗里的「下载导出工具 YaeAchievement」直达按钮（官方 releases，新标签打开）
+//   · 原先那个挤成一大段的 window.alert 说明，换成可滚动的弹窗版（手机上也能看）
 // ============================================================
 
 let currentUid = null;
@@ -51,6 +66,15 @@ const BLOCKED = {
 function getStorageKey(uid) { return `genshin_achievements_${uid}`; }
 function getTimesKey(uid) { return `genshin_achievement_times_${uid}`; }
 function getAccountsKey() { return `genshin_accounts`; }
+function getAuthKey() { return `genshin_achievement_auth_v1`; }
+function getSessionKey() { return `genshin_achievement_session_uid`; }
+
+// 密码保护的参数
+// 说明：这是「本机锁定」，不是服务器级安全 —— 进度数据本身仍以明文存在浏览器里，
+// 懂技术的人可以直接读浏览器存储绕过密码。密码哈希用了正经的 PBKDF2-SHA256 + 随机盐，
+// 目的是「即使有人翻到存储里的哈希，也反推不出你的密码」。
+const PBKDF2_ITERATIONS = 150000;
+const MIN_PASSWORD_LEN = 6;
 
 // 插入到 HTML 之前先转义，避免文件里的怪字符把页面搞坏
 function esc(s) {
@@ -220,13 +244,391 @@ function calcStats(data) {
 
 function pct(a, b) { return b > 0 ? Math.round(a / b * 100) : 0; }
 
+// ========== 账号密码（本机锁定） ==========
+// 安全边界（务必如实告知使用者）：
+//   · 密码用 PBKDF2-SHA256 + 16 字节随机盐 派生 150000 轮，只存哈希，不存明文；
+//   · 但它挡不住懂技术的人 —— 进度数据本身是明文存在浏览器里的，可以直接读。
+//     这道锁的用途是「防止别人在你电脑上顺手翻看」+「防止自己输错 UID 进错账号」。
+
+function getCryptoObj() {
+  try { return (typeof crypto !== 'undefined' && crypto) ? crypto : null; } catch (e) { return null; }
+}
+
+// WebCrypto 只在安全上下文（https / localhost）里存在；以 file:// 打开时没有 subtle
+function hasWebCrypto() {
+  const c = getCryptoObj();
+  return !!(c && c.subtle && typeof c.subtle.importKey === 'function' && typeof c.subtle.deriveBits === 'function');
+}
+
+function randomBytes(n) {
+  const a = new Uint8Array(n);
+  const c = getCryptoObj();
+  if (c && typeof c.getRandomValues === 'function') { c.getRandomValues(a); return a; }
+  for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256);
+  return a;
+}
+
+function bytesToB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function b64ToBytes(str) {
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// 自己实现 UTF-8 编码，不依赖 TextEncoder（某些环境没有）
+function utf8Bytes(str) {
+  if (typeof TextEncoder !== 'undefined') { try { return new TextEncoder().encode(str); } catch (e) { /* 落到下面 */ } }
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      const c2 = str.charCodeAt(++i);
+      const cp = 0x10000 + ((c & 0x3ff) << 10) + (c2 & 0x3ff);
+      out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+    } else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return new Uint8Array(out);
+}
+
+// ---- 纯 JS SHA-256 / HMAC-SHA256 / PBKDF2（file:// 打开时的兜底，与 WebCrypto 结果一致）----
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotr32(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+function sha256Bytes(msg) {
+  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const l = msg.length;
+  const withOne = l + 1;
+  const rem = withOne % 64;
+  const padLen = rem <= 56 ? 56 - rem : 120 - rem;
+  const total = l + 1 + padLen + 8;
+  const buf = new Uint8Array(total);
+  buf.set(msg, 0);
+  buf[l] = 0x80;
+  const dv = new DataView(buf.buffer);
+  const bitLen = l * 8;
+  dv.setUint32(total - 8, Math.floor(bitLen / 0x100000000), false);
+  dv.setUint32(total - 4, bitLen >>> 0, false);
+
+  const w = new Uint32Array(64);
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const x = w[i - 15], y = w[i - 2];
+      const s0 = (rotr32(x, 7) ^ rotr32(x, 18) ^ (x >>> 3)) >>> 0;
+      const s1 = (rotr32(y, 17) ^ rotr32(y, 19) ^ (y >>> 10)) >>> 0;
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (let i = 0; i < 64; i++) {
+      const S1 = (rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25)) >>> 0;
+      const ch = ((e & f) ^ (~e & g)) >>> 0;
+      const t1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = (rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22)) >>> 0;
+      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+  }
+  const out = new Uint8Array(32);
+  const odv = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) odv.setUint32(i * 4, H[i], false);
+  return out;
+}
+
+function hmacSha256Js(keyBytes, msgBytes) {
+  const B = 64;
+  const HASH_LEN = 32;
+  let k = keyBytes;
+  if (k.length > B) k = sha256Bytes(k);
+  const kPad = new Uint8Array(B);
+  kPad.set(k, 0);
+  const oKey = new Uint8Array(B + HASH_LEN);
+  const iKey = new Uint8Array(B + msgBytes.length);
+  for (let i = 0; i < B; i++) {
+    oKey[i] = kPad[i] ^ 0x5c;
+    iKey[i] = kPad[i] ^ 0x36;
+  }
+  iKey.set(msgBytes, B);
+  const inner = sha256Bytes(iKey);
+  oKey.set(inner, B);
+  return sha256Bytes(oKey);
+}
+
+function pbkdf2Sha256Js(passwordBytes, saltBytes, iterations, dkLen) {
+  const hLen = 32;
+  const blocks = Math.ceil(dkLen / hLen);
+  const out = new Uint8Array(blocks * hLen);
+  const msg = new Uint8Array(saltBytes.length + 4);
+  msg.set(saltBytes, 0);
+  const mdv = new DataView(msg.buffer);
+  let offset = 0;
+  for (let i = 1; i <= blocks; i++) {
+    mdv.setUint32(saltBytes.length, i, false);
+    let u = hmacSha256Js(passwordBytes, msg);
+    const t = new Uint8Array(u);
+    for (let j = 1; j < iterations; j++) {
+      u = hmacSha256Js(passwordBytes, u);
+      for (let k = 0; k < hLen; k++) t[k] ^= u[k];
+    }
+    out.set(t, offset);
+    offset += hLen;
+  }
+  return out.slice(0, dkLen);
+}
+
+// 统一入口：有 WebCrypto 走原生（快），否则走上面的纯 JS 实现（结果相同）
+async function derivePasswordHash(password, saltBytes, iterations) {
+  if (hasWebCrypto()) {
+    const km = await crypto.subtle.importKey('raw', utf8Bytes(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt: saltBytes, iterations: iterations, hash: 'SHA-256' }, km, 256
+    );
+    return new Uint8Array(bits);
+  }
+  return pbkdf2Sha256Js(utf8Bytes(password), saltBytes, iterations, 32);
+}
+
+// 定长比较，避免通过耗时差异猜哈希
+function equalHash(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return diff === 0;
+}
+
+// ---- 凭据存储 ----
+function getAuthStore() {
+  try {
+    const raw = localStorage.getItem(getAuthKey());
+    const o = raw ? JSON.parse(raw) : {};
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  } catch (e) { return {}; }
+}
+
+function setAuthStore(store) {
+  try { localStorage.setItem(getAuthKey(), JSON.stringify(store)); return true; } catch (e) { return false; }
+}
+
+function getAuthRecord(uid) { return getAuthStore()[String(uid)] || null; }
+function hasPassword(uid) { return !!getAuthRecord(uid); }
+
+function setAuthRecord(uid, rec) {
+  const s = getAuthStore();
+  s[String(uid)] = rec;
+  return setAuthStore(s);
+}
+
+function deleteAuthRecord(uid) {
+  const s = getAuthStore();
+  delete s[String(uid)];
+  setAuthStore(s);
+}
+
+function createAccountPassword(uid, password) {
+  const salt = randomBytes(16);
+  return derivePasswordHash(password, salt, PBKDF2_ITERATIONS).then(hash => {
+    return setAuthRecord(uid, {
+      v: 1,
+      algo: hasWebCrypto() ? 'PBKDF2-SHA256' : 'PBKDF2-SHA256-js',
+      iter: PBKDF2_ITERATIONS,
+      salt: bytesToB64(salt),
+      hash: bytesToB64(hash),
+      created: Date.now(),
+      loginAt: Date.now(),
+    });
+  });
+}
+
+function checkAccountPassword(uid, password) {
+  const rec = getAuthRecord(uid);
+  if (!rec || !rec.salt || !rec.hash) return Promise.resolve(false);
+  return derivePasswordHash(password, b64ToBytes(rec.salt), rec.iter || PBKDF2_ITERATIONS)
+    .then(hash => equalHash(bytesToB64(hash), rec.hash));
+}
+
+function touchLogin(uid) {
+  const rec = getAuthRecord(uid);
+  if (!rec) return;
+  rec.loginAt = Date.now();
+  setAuthRecord(uid, rec);
+}
+
+// ---- 会话（放 sessionStorage：刷新页面不掉线，关掉浏览器需要重新输密码）----
+function setSession(uid) { try { sessionStorage.setItem(getSessionKey(), String(uid)); } catch (e) { /* 隐私模式下可能不可用 */ } }
+function getSession() { try { return sessionStorage.getItem(getSessionKey()); } catch (e) { return null; } }
+function clearSession() { try { sessionStorage.removeItem(getSessionKey()); } catch (e) { /* 忽略 */ } }
+
 // ========== 登录页 ==========
+// 让出一帧，好让「正在校验…」先画出来（纯 JS 兜底路径下 PBKDF2 会阻塞 1~3 秒）
+function nextFrame() { return new Promise(r => setTimeout(r, 0)); }
+
+// 密码输入框是动态注入的 —— index.html 保持不动（与站点其他增强一致）
+function ensureAuthFields() {
+  const form = document.querySelector('#login-page .login-form');
+  if (!form) return;
+
+  if (!document.getElementById('pwd-input')) {
+    const wrap = document.createElement('div');
+    wrap.className = 'auth-fields';
+    wrap.innerHTML =
+      '<div class="pwd-row">' +
+        '<label for="pwd-input">密码</label>' +
+        '<input type="password" id="pwd-input" placeholder="请输入密码" autocomplete="current-password" maxlength="128">' +
+      '</div>' +
+      '<div class="pwd-row" id="pwd2-row" style="display:none;">' +
+        '<label for="pwd2-input">确认密码</label>' +
+        '<input type="password" id="pwd2-input" placeholder="再输一次，避免打错" autocomplete="new-password" maxlength="128">' +
+      '</div>' +
+      '<p class="auth-mode-hint" id="auth-mode-hint"></p>' +
+      '<p class="auth-strength" id="auth-strength"></p>';
+    const uidEl = form.querySelector('#uid-input');
+    // 必须插在 UID 输入框之后、登录按钮之前 —— #login-error 在按钮后面，不能拿它当锚点
+    if (uidEl && uidEl.parentNode === form) form.insertBefore(wrap, uidEl.nextSibling);
+    else {
+      const btn = form.querySelector('#login-btn');
+      if (btn) form.insertBefore(wrap, btn); else form.appendChild(wrap);
+    }
+  }
+
+  if (!document.getElementById('auth-note')) {
+    const container = document.querySelector('#login-page .login-container');
+    const saved = document.getElementById('saved-accounts');
+    const note = document.createElement('div');
+    note.id = 'auth-note';
+    note.className = 'auth-security-note';
+    note.innerHTML =
+      '<b>关于这道密码</b>' +
+      '<span>密码只保存在这台设备的这个浏览器里，经 PBKDF2-SHA256 + 随机盐派生后存哈希，不存明文。' +
+      '它能防止别人顺手打开你的浏览器翻看，但<b>挡不住懂技术的人</b> —— 进度数据本身是明文存放的，' +
+      '按 F12 就能读到。所以：<b class="auth-warn">请不要使用你在别处用过的密码。</b></span>';
+    if (container && saved) container.insertBefore(note, saved);
+    else if (container) container.appendChild(note);
+  }
+}
+
 function initLoginPage() {
+  ensureAuthFields();
   const uidInput = document.getElementById('uid-input');
+  const pwdInput = document.getElementById('pwd-input');
+  const pwd2Input = document.getElementById('pwd2-input');
+  const pwd2Row = document.getElementById('pwd2-row');
   const loginBtn = document.getElementById('login-btn');
   const loginError = document.getElementById('login-error');
+  const modeHint = document.getElementById('auth-mode-hint');
+  const strengthEl = document.getElementById('auth-strength');
   const accountsList = document.getElementById('accounts-list');
   const savedAccounts = document.getElementById('saved-accounts');
+  if (!uidInput || !pwdInput || !loginBtn) return;
+
+  const btnLabel = () => (authMode(uidInput.value) === 'register' ? '注册并进入' : '登录');
+
+  function authMode(uid) {
+    return uid && hasPassword(uid) ? 'login' : 'register';
+  }
+
+  function refreshMode() {
+    const uid = String(uidInput.value || '').trim();
+    const isRegister = authMode(uid) === 'register';
+    pwd2Row.style.display = isRegister ? 'block' : 'none';
+    loginBtn.textContent = btnLabel();
+    pwdInput.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
+    if (!uid) {
+      modeHint.textContent = '第一次用某个 UID，填进去并设置一个密码；已经设过密码的 UID 直接输密码登录。';
+      modeHint.className = 'auth-mode-hint';
+    } else if (isRegister) {
+      modeHint.textContent = 'UID ' + uid + ' 还没有设过密码，请为它设置一个（至少 ' + MIN_PASSWORD_LEN + ' 位）。';
+      modeHint.className = 'auth-mode-hint is-register';
+    } else {
+      modeHint.textContent = 'UID ' + uid + ' 已设置密码，请输入密码登录。';
+      modeHint.className = 'auth-mode-hint is-login';
+    }
+  }
+
+  function refreshStrength() {
+    const v = pwdInput.value || '';
+    if (!strengthEl) return;
+    if (!v) { strengthEl.textContent = ''; strengthEl.className = 'auth-strength'; return; }
+    let score = 0;
+    if (v.length >= 8) score++;
+    if (v.length >= 12) score++;
+    if (/[a-z]/.test(v) && /[A-Z]/.test(v)) score++;
+    if (/\d/.test(v)) score++;
+    if (/[^A-Za-z0-9]/.test(v)) score++;
+    const label = score >= 4 ? '较强' : score >= 2 ? '一般' : '偏弱';
+    const cls = score >= 4 ? 'is-strong' : score >= 2 ? 'is-mid' : 'is-weak';
+    strengthEl.textContent = '密码强度：' + label + (score < 2 ? '（建议 8 位以上、字母数字混用）' : '');
+    strengthEl.className = 'auth-strength ' + cls;
+  }
+
+  function setError(msg) { if (loginError) loginError.textContent = msg || ''; }
+
+  function busy(on, text) {
+    loginBtn.disabled = !!on;
+    loginBtn.textContent = on ? (text || '处理中…') : btnLabel();
+  }
+
+  function clearPwd() {
+    pwdInput.value = '';
+    if (pwd2Input) pwd2Input.value = '';
+    if (strengthEl) { strengthEl.textContent = ''; strengthEl.className = 'auth-strength'; }
+  }
+
+  function enterAccount(uid) {
+    currentUid = String(uid);
+    userAchievements[currentUid] = loadAchievements(currentUid);
+    doneTimes = loadTimes(currentUid);
+    lastSnapshot = null;
+    persist();
+    touchLogin(currentUid);
+    setSession(currentUid);
+    showMainPage();
+  }
+
+  async function requestDeleteAccount(uid) {
+    // 删除不可逆：先确认，并提示先导出备份
+    const okDel = window.confirm(
+      '确定要删除 UID ' + uid + ' 的本地成就记录吗？\n\n' +
+      '该账号在这台设备上保存的进度会被永久删除，无法恢复。\n' +
+      '建议先用「导出备份（JSON）」保存一份再删除。'
+    );
+    if (!okDel) return;
+    if (hasPassword(uid)) {
+      const typed = window.prompt('删除前请验证：输入 UID ' + uid + ' 的密码');
+      if (typed === null) return;
+      busy(true, '正在校验…');
+      await nextFrame();
+      const pass = await checkAccountPassword(uid, typed);
+      busy(false);
+      if (!pass) { window.alert('密码不对，已取消删除。'); return; }
+    }
+    removeAccount(uid);
+    deleteAuthRecord(uid);
+    if (getSession() === String(uid)) clearSession();
+    if (currentUid === String(uid)) currentUid = null;
+    setError('');
+    renderSavedAccounts();
+  }
 
   function renderSavedAccounts() {
     const accounts = getAccounts();
@@ -234,50 +636,82 @@ function initLoginPage() {
     if (accounts.length === 0) { savedAccounts.style.display = 'none'; return; }
     savedAccounts.style.display = 'block';
     accounts.forEach(uid => {
+      const locked = hasPassword(uid);
       const tag = document.createElement('span');
       tag.className = 'account-tag';
-      tag.innerHTML = `<span>UID: ${uid}</span><span class="delete-tag" data-uid="${uid}" title="删除这个账号的本地记录">&times;</span>`;
+      tag.innerHTML =
+        '<span class="account-uid">UID: ' + esc(uid) +
+        ' <span class="pwd-badge' + (locked ? '' : ' is-none') + '">' + (locked ? '已设密码' : '未设密码') + '</span></span>' +
+        '<span class="delete-tag" data-uid="' + esc(uid) + '" title="删除这个账号的本地记录">&times;</span>';
       tag.addEventListener('click', (e) => {
         if (e.target.classList.contains('delete-tag')) return;
-        doLogin(uid);
+        // 不再直接进入 —— 必须过密码这一关
+        uidInput.value = uid;
+        pwdInput.value = '';
+        if (pwd2Input) pwd2Input.value = '';
+        setError('');
+        refreshMode();
+        refreshStrength();
+        pwdInput.focus();
       });
       tag.querySelector('.delete-tag').addEventListener('click', (e) => {
         e.stopPropagation();
-        // 删除不可逆：先确认，并提示先导出备份
-        const ok = window.confirm(
-          `确定要删除 UID ${uid} 的本地成就记录吗？\n\n` +
-          `该账号在本浏览器里保存的进度会被永久删除，无法恢复。\n` +
-          `建议先用「导出文本 / 导出备份」保存一份再删除。`
-        );
-        if (!ok) return;
-        removeAccount(uid);
-        renderSavedAccounts();
+        requestDeleteAccount(uid);
       });
       accountsList.appendChild(tag);
     });
   }
 
-  function doLogin(uid) {
-    uid = String(uid).trim();
-    if (!uid) { loginError.textContent = '请输入 UID'; return; }
-    if (!/^\d+$/.test(uid)) { loginError.textContent = 'UID 必须为数字'; return; }
-    if (uid.length < 9) { loginError.textContent = 'UID 一般是 9 位数字，请检查'; return; }
-    loginError.textContent = '';
-    currentUid = uid;
-    userAchievements[currentUid] = loadAchievements(uid);
-    doneTimes = loadTimes(uid);
-    lastSnapshot = null;
-    persist();
-    showMainPage();
+  async function doLogin() {
+    const uid = String(uidInput.value || '').trim();
+    const pwd = pwdInput.value || '';
+    if (!uid) { setError('请输入 UID'); return; }
+    if (!/^\d+$/.test(uid)) { setError('UID 必须为数字'); return; }
+    if (uid.length < 9) { setError('UID 一般是 9 位数字，请检查'); return; }
+    if (!pwd) { setError('请输入密码'); return; }
+
+    const mode = authMode(uid);
+    if (mode === 'register') {
+      if (pwd.length < MIN_PASSWORD_LEN) { setError('密码至少 ' + MIN_PASSWORD_LEN + ' 位'); return; }
+      if (pwd !== (pwd2Input ? pwd2Input.value : '')) { setError('两次输入的密码不一致'); return; }
+      setError('');
+      busy(true, '正在创建…');
+      await nextFrame();
+      const saved = await createAccountPassword(uid, pwd);
+      busy(false);
+      if (!saved) { setError('密码保存失败：浏览器存储可能已满或被禁用'); return; }
+      clearPwd();
+      enterAccount(uid);
+      showToast('已为 UID ' + uid + ' 设好密码 —— 每个 UID 的进度各自独立保存');
+    } else {
+      setError('');
+      busy(true, '正在校验…');
+      await nextFrame();
+      const pass = await checkAccountPassword(uid, pwd);
+      busy(false);
+      if (!pass) { setError('密码不对，再试一次'); try { pwdInput.select(); } catch (e) { /* 忽略 */ } return; }
+      clearPwd();
+      enterAccount(uid);
+    }
+    refreshMode();
   }
 
   // 只绑定一次，避免反复退出/登录后监听器叠加
   if (!initLoginPage._bound) {
     initLoginPage._bound = true;
-    loginBtn.addEventListener('click', () => doLogin(uidInput.value));
-    uidInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(uidInput.value); });
+    loginBtn.addEventListener('click', doLogin);
+    [uidInput, pwdInput, pwd2Input].forEach(el => {
+      if (!el) return;
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    });
+    uidInput.addEventListener('input', refreshMode);
+    uidInput.addEventListener('blur', refreshMode);
+    pwdInput.addEventListener('input', refreshStrength);
   }
+
   window.__renderSavedAccounts = renderSavedAccounts;
+  window.__refreshLoginUi = () => { refreshMode(); refreshStrength(); renderSavedAccounts(); };
+  refreshMode();
   renderSavedAccounts();
 }
 
@@ -289,6 +723,7 @@ function showMainPage() {
   buildAchievementList();
   ensureFilterBar();
   ensureHeaderImportBtn();
+  ensureHeaderSwitchBtn();
   renderAchievements();
   updateStats();
 }
@@ -296,9 +731,238 @@ function showMainPage() {
 function showLoginPage() {
   document.getElementById('main-page').classList.remove('active');
   document.getElementById('login-page').classList.add('active');
-  document.getElementById('uid-input').value = '';
+  const u = document.getElementById('uid-input'); if (u) u.value = '';
+  const p = document.getElementById('pwd-input'); if (p) p.value = '';
+  const p2 = document.getElementById('pwd2-input'); if (p2) p2.value = '';
+  const e = document.getElementById('login-error'); if (e) e.textContent = '';
+  const s = document.getElementById('auth-strength'); if (s) { s.textContent = ''; s.className = 'auth-strength'; }
   document.getElementById('filter-bar')?.remove();
+  const sw = document.getElementById('switch-modal'); if (sw) sw.style.display = 'none';
   currentUid = null;
+  if (window.__refreshLoginUi) window.__refreshLoginUi();
+}
+
+// 顶栏「切换账号」按钮（动态注入，不改 index.html）
+function ensureHeaderSwitchBtn() {
+  const right = document.querySelector('.header-right');
+  if (!right || document.getElementById('switch-account-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'switch-account-btn';
+  btn.className = 'btn-secondary';
+  btn.textContent = '切换账号';
+  btn.title = '不用退出页面，直接切到另一个 UID';
+  btn.addEventListener('click', openSwitchModal);
+  const logout = document.getElementById('logout-btn');
+  if (logout) right.insertBefore(btn, logout); else right.appendChild(btn);
+}
+
+// ========== 切换账号弹窗 ==========
+let switchTarget = null;
+
+// 换密码时保留原 created 时间
+function changeAccountPassword(uid, password) {
+  const rec = getAuthRecord(uid);
+  const created = rec ? rec.created : Date.now();
+  return createAccountPassword(uid, password).then(ok => {
+    if (ok) {
+      const r = getAuthRecord(uid);
+      if (r) { r.created = created; r.changedAt = Date.now(); setAuthRecord(uid, r); }
+    }
+    return ok;
+  });
+}
+
+// 不离开主界面，直接换到另一个 UID
+function switchToAccount(uid) {
+  currentUid = String(uid);
+  userAchievements[currentUid] = loadAchievements(currentUid);
+  doneTimes = loadTimes(currentUid);
+  lastSnapshot = null;
+  persist();
+  touchLogin(currentUid);
+  setSession(currentUid);
+
+  document.getElementById('current-uid').textContent = currentUid;
+  const si = document.getElementById('search-input'); if (si) si.value = '';
+  const sr = document.getElementById('search-results'); if (sr) sr.style.display = 'none';
+  currentSearchKeys = [];
+  viewFilter = 'all';
+  hideHidden = false;
+  document.getElementById('filter-bar')?.remove();
+  buildAchievementList();
+  ensureFilterBar();
+  renderAchievements();
+  updateStats();
+  showToast('已切换到 UID ' + currentUid);
+}
+
+function renderSwitchModal() {
+  const modal = document.getElementById('switch-modal');
+  if (!modal) return;
+  const cur = modal.querySelector('#switch-current-uid');
+  if (cur) cur.textContent = currentUid || '';
+  modal.querySelector('#switch-pwd-box').style.display = 'none';
+  modal.querySelector('#chpwd-box').style.display = 'none';
+  modal.querySelector('#switch-error').textContent = '';
+  modal.querySelector('#chpwd-error').textContent = '';
+  modal.querySelector('#switch-pwd-input').value = '';
+  ['#chpwd-old', '#chpwd-new', '#chpwd-new2'].forEach(s => { modal.querySelector(s).value = ''; });
+  switchTarget = null;
+
+  const list = modal.querySelector('#switch-list');
+  list.innerHTML = '';
+  const accounts = getAccounts();
+  if (!accounts.length) {
+    list.innerHTML = '<p class="switch-empty">这台设备上还没有保存过账号。</p>';
+    return;
+  }
+  accounts.forEach(uid => {
+    const isCur = String(uid) === String(currentUid);
+    const locked = hasPassword(uid);
+    const row = document.createElement('div');
+    row.className = 'switch-row' + (isCur ? ' is-current' : '');
+    row.innerHTML =
+      '<span class="switch-uid">UID: ' + esc(uid) + (isCur ? ' <span class="switch-here">当前</span>' : '') + '</span>' +
+      '<span class="pwd-badge' + (locked ? '' : ' is-none') + '">' + (locked ? '已设密码' : '未设密码') + '</span>';
+    if (!isCur) {
+      row.title = locked ? '点击后输入密码即可切过去' : '这个 UID 还没设密码';
+      row.addEventListener('click', () => {
+        if (!locked) {
+          window.alert(
+            'UID ' + uid + ' 还没有设置密码。\n\n' +
+            '现在这个站点要求每个账号都有密码才能进入 —— 这样才不会输错一位 UID 就进到别的账号。\n' +
+            '请先「退出登录」，在登录页输入这个 UID 并设一个密码，它原来的进度不会被影响。'
+          );
+          return;
+        }
+        switchTarget = String(uid);
+        modal.querySelector('#switch-target-uid').textContent = uid;
+        modal.querySelector('#switch-pwd-box').style.display = 'block';
+        modal.querySelector('#chpwd-box').style.display = 'none';
+        modal.querySelector('#switch-error').textContent = '';
+        const pi = modal.querySelector('#switch-pwd-input');
+        pi.value = '';
+        pi.focus();
+      });
+    }
+    list.appendChild(row);
+  });
+  return list;
+}
+
+function bindSwitchModal(modal) {
+  const close = () => { modal.style.display = 'none'; };
+  modal.querySelector('#close-switch').addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  const pi = modal.querySelector('#switch-pwd-input');
+  const confirmBtn = modal.querySelector('#switch-confirm');
+  const err = modal.querySelector('#switch-error');
+
+  async function doSwitch() {
+    if (!switchTarget) { err.textContent = '请先点一个账号'; return; }
+    const pwd = pi.value || '';
+    if (!pwd) { err.textContent = '请输入密码'; return; }
+    err.textContent = '';
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '正在校验…';
+    await nextFrame();
+    const pass = await checkAccountPassword(switchTarget, pwd);
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '切换到该账号';
+    if (!pass) { err.textContent = '密码不对'; try { pi.select(); } catch (e) { /* 忽略 */ } return; }
+    const target = switchTarget;
+    pi.value = '';
+    close();
+    switchToAccount(target);
+  }
+  confirmBtn.addEventListener('click', doSwitch);
+  pi.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSwitch(); });
+
+  const chBox = modal.querySelector('#chpwd-box');
+  modal.querySelector('#change-pwd-btn').addEventListener('click', () => {
+    const show = chBox.style.display === 'none';
+    chBox.style.display = show ? 'block' : 'none';
+    if (show) {
+      modal.querySelector('#switch-pwd-box').style.display = 'none';
+      modal.querySelector('#chpwd-uid').textContent = currentUid || '';
+      modal.querySelector('#chpwd-error').textContent = '';
+      ['#chpwd-old', '#chpwd-new', '#chpwd-new2'].forEach(s => { modal.querySelector(s).value = ''; });
+      modal.querySelector('#chpwd-old').focus();
+    }
+  });
+
+  const chConfirm = modal.querySelector('#chpwd-confirm');
+  async function doChangePwd() {
+    const cerr = modal.querySelector('#chpwd-error');
+    const oldP = modal.querySelector('#chpwd-old').value || '';
+    const n1 = modal.querySelector('#chpwd-new').value || '';
+    const n2 = modal.querySelector('#chpwd-new2').value || '';
+    if (!hasPassword(currentUid)) { cerr.textContent = '当前账号还没有设置密码'; return; }
+    if (!oldP) { cerr.textContent = '请输入当前密码'; return; }
+    if (n1.length < MIN_PASSWORD_LEN) { cerr.textContent = '新密码至少 ' + MIN_PASSWORD_LEN + ' 位'; return; }
+    if (n1 !== n2) { cerr.textContent = '两次输入的新密码不一致'; return; }
+    if (n1 === oldP) { cerr.textContent = '新密码不能和当前密码相同'; return; }
+    cerr.textContent = '';
+    chConfirm.disabled = true;
+    chConfirm.textContent = '正在校验…';
+    await nextFrame();
+    const pass = await checkAccountPassword(currentUid, oldP);
+    if (!pass) {
+      chConfirm.disabled = false; chConfirm.textContent = '保存新密码';
+      cerr.textContent = '当前密码不对';
+      return;
+    }
+    chConfirm.textContent = '正在保存…';
+    await nextFrame();
+    await changeAccountPassword(currentUid, n1);
+    chConfirm.disabled = false; chConfirm.textContent = '保存新密码';
+    chBox.style.display = 'none';
+    ['#chpwd-old', '#chpwd-new', '#chpwd-new2'].forEach(s => { modal.querySelector(s).value = ''; });
+    showToast('密码已修改，下次用新密码登录');
+  }
+  chConfirm.addEventListener('click', doChangePwd);
+}
+
+function openSwitchModal() {
+  let modal = document.getElementById('switch-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'switch-modal';
+    modal.className = 'modal';
+    modal.innerHTML =
+      '<div class="modal-content switch-content">' +
+        '<div class="modal-header">' +
+          '<h3>账号</h3>' +
+          '<button class="btn-close" id="close-switch">&times;</button>' +
+        '</div>' +
+        '<div class="switch-body">' +
+          '<div class="switch-current">当前账号：<b id="switch-current-uid"></b></div>' +
+          '<div class="switch-list" id="switch-list"></div>' +
+          '<div class="switch-pwd" id="switch-pwd-box" style="display:none;">' +
+            '<label>输入 UID <b id="switch-target-uid"></b> 的密码</label>' +
+            '<input type="password" id="switch-pwd-input" placeholder="密码" autocomplete="current-password" maxlength="128">' +
+            '<p class="error-msg" id="switch-error"></p>' +
+            '<button class="btn-primary" id="switch-confirm">切换到该账号</button>' +
+          '</div>' +
+          '<div class="switch-pwd" id="chpwd-box" style="display:none;">' +
+            '<label>修改 UID <b id="chpwd-uid"></b> 的密码</label>' +
+            '<input type="password" id="chpwd-old" placeholder="当前密码" autocomplete="current-password" maxlength="128">' +
+            '<input type="password" id="chpwd-new" placeholder="新密码（至少 ' + MIN_PASSWORD_LEN + ' 位）" autocomplete="new-password" maxlength="128">' +
+            '<input type="password" id="chpwd-new2" placeholder="再输一次新密码" autocomplete="new-password" maxlength="128">' +
+            '<p class="error-msg" id="chpwd-error"></p>' +
+            '<button class="btn-primary" id="chpwd-confirm">保存新密码</button>' +
+          '</div>' +
+          '<div class="switch-actions">' +
+            '<button class="btn-small" id="change-pwd-btn">修改密码</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    bindSwitchModal(modal);
+  }
+  renderSwitchModal();
+  modal.style.display = 'flex';
 }
 
 // 顶栏「导入进度」按钮（动态注入，不改 index.html）
@@ -1078,6 +1742,12 @@ function openImportModal() {
             <div class="import-opt"><b>UIAF 成就文件</b>（推荐）—— 用游戏成就导出工具生成，一次导入全部进度，还带完成时间</div>
             <div class="import-opt"><b>本站备份 JSON</b> —— 就是「导出备份」生成的那个文件</div>
             <div class="import-tip">导入只做<b>合并</b>：补上你已完成、网站还没勾的，不会取消你已有的进度。</div>
+
+            <div class="import-guide-cta">
+              <button class="btn-small guide-btn" id="import-guide-btn">具体操作流程</button>
+              <a class="btn-small guide-btn guide-dl" id="import-download-btn" href="https://github.com/HolographicHat/Yae/releases/latest" target="_blank" rel="noopener noreferrer">下载导出工具 YaeAchievement</a>
+              <span>还没有 UIAF 文件？工具<b>免费开源</b>、Windows 专用。下载页里只拿 <code>YaeAchievement.exe</code> 那一个（约 11 MB）。<br>第一次用建议先点「具体操作流程」 —— 从下载、导出到导入本站都有分步说明，还带常见问题排查表。</span>
+            </div>
           </div>
           <div class="import-pick">
             <button class="btn-small import-pick-btn" id="pick-file">选择文件…</button>
@@ -1086,7 +1756,7 @@ function openImportModal() {
           <div class="import-report" id="import-report"></div>
         </div>
         <div class="modal-footer">
-          <button class="btn-small" id="import-help">UIAF 文件怎么拿？</button>
+          <button class="btn-small" id="import-help">具体操作流程</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -1105,7 +1775,10 @@ function openImportModal() {
       if (fileInput.files && fileInput.files[0]) handleImportFile(fileInput.files[0]);
       fileInput.value = '';
     });
-    modal.querySelector('#import-help').addEventListener('click', showImportHelp);
+    // 两个入口指向同一份说明
+    modal.querySelector('#import-help').addEventListener('click', openImportGuide);
+    const guideEntry = modal.querySelector('#import-guide-btn');
+    if (guideEntry) guideEntry.addEventListener('click', openImportGuide);
   }
 
   // 每次打开都重置
@@ -1220,23 +1893,118 @@ function applyPendingImport() {
   showToast(`已从${isUiaf ? ' UIAF ' : '备份'}导入 ${applied} 条已完成记录`);
 }
 
-function showImportHelp() {
-  window.alert(
-    'UIAF 文件怎么拿？\n\n' +
-    '1. 下载「YaeAchievement」—— 开源免费的成就导出工具（Windows）\n' +
-    '2. 先确保原神没有在运行，然后双击打开它，它会自动帮你把游戏启动起来\n' +
-    '3. 正常登录进游戏，工具会自动读取你的全部成就；读完后游戏会自动退出\n' +
-    '4. 在它列出的导出目标里选「UIAF JSON File」，得到一个 .json 文件\n' +
-    '5. 回到本页，点「选择文件…」把这个 json 导进来\n\n' +
-    '两个要注意的地方：\n' +
-    '· 工具不要和游戏主程序放在同一个文件夹，否则游戏会报「数据异常(31-4302)」\n' +
-    '· 它抓到的数据会缓存 1 小时。如果你有多个账号，可以在缓存有效期内依次登录、\n' +
-    '  分别导出，然后回到本站切换到对应 UID 分别导入\n\n' +
-    'UIAF 是 UIGF 组织制定的通用成就数据标准（uigf.org），本站支持导入也支持导出，\n' +
-    '所以你的进度也可以随时带去椰羊、Paimon.moe、胡桃工具箱等工具。\n\n' +
-    '不想用第三方工具的话，也可以继续手动勾选，或者用每个合辑卡片上的「整组完成」。'
-  );
+// 导入操作流程说明 —— 弹窗版（原先是 window.alert，一长串文字很难读）
+function openImportGuide() {
+  let modal = document.getElementById('guide-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'guide-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content guide-content">
+        <div class="modal-header">
+          <h3>导入成就进度 · 完整操作流程</h3>
+          <button class="btn-close" id="close-guide">×</button>
+        </div>
+        <div class="guide-body">
+          <div class="guide-lead">
+            游戏里 1800 多条成就，想一条条手工回来勾是不现实的。这个功能让你用一款<b>免费的开源工具</b>把游戏里的成就一次性导出，
+            再回本站一次性地导入进来。<br>
+            整个过程<b>不需要把米哈游账号密码交给任何工具</b>，导出的文件也<b>不会上传到任何服务器</b> ——
+            全部在你自己的电脑和浏览器里完成。
+          </div>
+
+          <h4 class="guide-h"><span class="guide-num">1</span>下载导出工具</h4>
+          <p class="guide-p">工具叫 <b>YaeAchievement</b>（作者后来把项目改名成 <b>Yae</b>，老链接会自动跳转），免费开源，Windows 专用。</p>
+          <ul class="guide-list">
+            <li>官方下载页：<a class="guide-link" href="https://github.com/HolographicHat/Yae/releases/latest" target="_blank" rel="noopener noreferrer">github.com/HolographicHat/Yae/releases/latest</a></li>
+            <li>下载列表里<b>只需要拿 <code>YaeAchievement.exe</code></b> 这一个（约 11 MB）</li>
+            <li>同一个列表里的 <code>YaeAchievement.pdb</code> 是 50 MB 的调试符号文件，<b>用不上，别下</b></li>
+            <li>给它<b>单独新建一个文件夹</b>放，比如桌面新建一个「成就导出」</li>
+          </ul>
+          <div class="guide-warn"><b>千万别把 exe 和原神主程序放在同一个文件夹</b>，否则游戏会报「数据异常(31-4302)」，进不去游戏。</div>
+
+          <h4 class="guide-h"><span class="guide-num">2</span>运行工具，把成就导出来</h4>
+          <table class="guide-table">
+            <thead><tr><th>步骤</th><th>你要做什么</th><th>会发生什么</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>确认原神已经<b>完全退出</b>（启动器也关掉）</td><td>—</td></tr>
+              <tr><td>2</td><td>双击 <code>YaeAchievement.exe</code></td><td>它自动帮你把游戏启动起来</td></tr>
+              <tr><td>3</td><td>正常登录，进入游戏</td><td>工具会自动读取你的全部成就</td></tr>
+              <tr><td>4</td><td>等它读完</td><td><b>游戏会自动退出</b> —— 这是正常现象，不是崩溃</td></tr>
+              <tr><td>5</td><td>在弹出的导出目标列表里，选最后一项 <b>「UIAF JSON File」</b></td><td>得到一个 <code>.json</code> 文件</td></tr>
+              <tr><td>6</td><td>找到那个文件</td><td>它就在 exe 所在的文件夹里，名字形如 <code>export-20xxxxxxxxxxxx-xxx.json</code></td></tr>
+            </tbody>
+          </table>
+          <div class="guide-tip">列表里其它几项（椰羊、胡桃工具箱、Paimon.moe、CSV 表格等）是给别的工具用的，<b>本站要选「UIAF JSON File」</b>。</div>
+          <div class="guide-warn">如果杀毒软件把它拦了：这款工具需要读取游戏进程的内存，容易被误报，需要你手动放行。整个过程<b>不需要你把米哈游账号密码输入给这个工具</b>。</div>
+
+          <h4 class="guide-h"><span class="guide-num">3</span>回到本站导入</h4>
+          <ol class="guide-steps">
+            <li>点顶栏的「<b>导入进度</b>」</li>
+            <li>点「选择文件…」，选中刚才那个 json</li>
+            <li>先看<b>预览报告</b>：一共多少条 / 已完成多少 / 将新增多少 / 有没有本站还没收录的</li>
+            <li>确认没问题，点「<b>确认导入</b>」</li>
+            <li>底部会弹出一条提示，<b>12 秒内可以点「撤销」</b> —— 导错了立刻撤销就行</li>
+          </ol>
+          <div class="guide-tip">导入是<b>合并</b>语义：只补上你已完成、网站还没勾的，<b>绝不会取消</b>你已有的进度。同一个文件重复导入也是安全的。</div>
+
+          <h4 class="guide-h"><span class="guide-num">4</span>有多个账号怎么办</h4>
+          <ul class="guide-list">
+            <li>工具抓到的数据会<b>缓存 1 小时</b>。所以可以在缓存有效期内：依次登录每个号 → 分别导出 → 回本站用顶栏的「<b>切换账号</b>」切到对应 UID → 分别导入</li>
+            <li>本站每个 UID 的进度互不影响，切号不会互相覆盖</li>
+          </ul>
+
+          <h4 class="guide-h"><span class="guide-num">5</span>出问题了？对照这张表</h4>
+          <table class="guide-table">
+            <thead><tr><th>现象</th><th>原因</th><th>怎么办</th></tr></thead>
+            <tbody>
+              <tr><td>游戏报「数据异常(31-4302)」</td><td>exe 和原神主程序放在同一个文件夹了</td><td>把 exe 挪到一个单独的文件夹里</td></tr>
+              <tr><td>下载列表里分不清该下哪个</td><td>—</td><td>只拿 <code>YaeAchievement.exe</code>；那个 50 MB 的 <code>.pdb</code> 不要</td></tr>
+              <tr><td>提示「有 N 条成就本站数据里还没有」</td><td>游戏版本比本站数据新（说明新版本已经上线了）</td><td>这 N 条会被<b>明确列出来、不会被丢掉</b>。等每天上午 10 点本站自动同步完成，再导入一次就补上了</td></tr>
+              <tr><td>导入完成，但进度看起来没变化</td><td>这份文件不是当前登录的这个 UID 导出的；或者那几条本来就已完成</td><td>用顶栏「切换账号」切到正确的号，再导一次</td></tr>
+              <tr><td>选完文件提示「不是合法的 JSON」</td><td>选错文件了（比如选成了 csv，或选成本站备份）</td><td>回工具里重新选「UIAF JSON File」，导出后再选那个 json</td></tr>
+              <tr><td>工具卡住 / 读不到成就</td><td>游戏没完全退出，或者权限不够</td><td>关掉游戏和启动器重来；还不行就右键 exe「以管理员身份运行」</td></tr>
+              <tr><td>导入后悔了</td><td>—</td><td>12 秒内点底部提示条上的「撤销」</td></tr>
+              <tr><td>不想用任何第三方工具</td><td>—</td><td>完全可以：手动逐条勾选，或者用每个合辑卡片右上角的「<b>整组完成</b>」一次性勾完一个合辑</td></tr>
+            </tbody>
+          </table>
+
+          <h4 class="guide-h"><span class="guide-num">6</span>安全与边界（建议读一下）</h4>
+          <ul class="guide-list">
+            <li>这类导出工具需要<b>读取游戏进程内存</b>，属于第三方软件，严格讲走在用户协议的边界上。社区长期共识是「只读、不修改游戏文件、风险很低」，但<b>不是零风险</b> —— 用不用由你自己判断。</li>
+            <li>它<b>不需要</b>你提供米哈游账号密码。</li>
+            <li>本站的导入 / 导出<b>全程在你的浏览器里完成，文件不会上传到任何服务器</b>。</li>
+            <li>你的进度只存在<b>这台设备的这个浏览器</b>里 —— 换电脑、换浏览器、清缓存就没了。所以建议隔一段时间用「导出备份（JSON）」或「导出 UIAF」存一份留底。</li>
+          </ul>
+
+          <h4 class="guide-h"><span class="guide-num">7</span>UIAF 是什么</h4>
+          <p class="guide-p">
+            UIAF（统一可交换成就格式 v1.1）是 UIGF 组织制定的通用成就数据标准，椰羊、Paimon.moe、胡桃工具箱、寻空等工具都认这个格式。
+            本站<b>既能导入也能导出</b>，所以进度导进来之后，随时可以再导出去带到别的工具里用。
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-small" id="close-guide-bottom">知道了</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const closeGuide = () => { modal.style.display = 'none'; };
+    modal.querySelector('#close-guide').addEventListener('click', closeGuide);
+    modal.querySelector('#close-guide-bottom').addEventListener('click', closeGuide);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeGuide(); });
+    // 说明里的外链不要顺带触发遮罩关闭
+    modal.querySelectorAll('.guide-link').forEach(a => a.addEventListener('click', (e) => e.stopPropagation()));
+  }
+  // 每次打开都回到顶部，别停在上次看到的位置
+  const body = modal.querySelector('.guide-body');
+  if (body) body.scrollTop = 0;
+  modal.style.display = 'flex';
 }
+
+// 兼容旧调用名
+function showImportHelp() { openImportGuide(); }
 
 function initExport() {
   const exportBtn = document.getElementById('export-btn');
@@ -1288,8 +2056,10 @@ function initMainEvents() {
   initMainEvents._bound = true;
 
   document.getElementById('logout-btn').addEventListener('click', () => {
+    // 退出前先把当前进度落盘，避免任何意外
+    if (currentUid) persist();
+    clearSession();
     showLoginPage();
-    if (window.__renderSavedAccounts) window.__renderSavedAccounts();
   });
 
   document.getElementById('expand-all').addEventListener('click', () => {
@@ -1317,4 +2087,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   initLoginPage();
   initMainEvents();
+
+  // 本次会话内刷新页面不掉线（会话存在 sessionStorage，关掉浏览器就需要重新输密码）
+  const sessUid = getSession();
+  if (sessUid && hasPassword(sessUid)) {
+    currentUid = String(sessUid);
+    userAchievements[currentUid] = loadAchievements(currentUid);
+    doneTimes = loadTimes(currentUid);
+    lastSnapshot = null;
+    showMainPage();
+  }
 });
