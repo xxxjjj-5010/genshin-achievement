@@ -902,6 +902,37 @@ body::before {
 .stats-reward b { color: var(--blue-600); font-size: 14px; }
 .stats-sub { color: var(--gray-400); margin-left: 4px; }
 .stats-tip { margin-top: 6px; font-size: 11px; color: var(--gray-400); line-height: 1.5; }
+
+/* 一键重置：低调的次要危险操作，平时不抢眼，悬停才变红提示后果 */
+.stats-reset-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  color: var(--gray-500);
+  border-color: var(--gray-200);
+}
+.stats-reset-btn:hover {
+  color: #b91c1c;
+  border-color: #f3c9c4;
+  background: #fdf2f1;
+}
+
+/* 导入弹窗里的「覆盖导入」勾选项 */
+.import-replace {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 12px 0 4px;
+  padding: 8px 10px;
+  border: 1px dashed var(--gold-300);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--gold-50);
+  font-size: 12px;
+  color: var(--gray-600);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.import-replace input { margin-top: 2px; flex: 0 0 auto; }
 .data-meta {
   margin-top: 10px;
   padding-top: 10px;

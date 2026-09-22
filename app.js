@@ -31,6 +31,13 @@
 //     后面各段编号整体前移；提示语里也去掉了「50MB 的 .pdb 别下」那句
 //   · 新增：导入弹窗里的「下载导出工具 YaeAchievement」直达按钮（官方 releases，新标签打开）
 //   · 原先那个挤成一大段的 window.alert 说明，换成可滚动的弹窗版（手机上也能看）
+// 分母与重置版 2026-09-22（第六轮）
+//   · 调整：「当前版本无法完成」的成就也计入总分母 —— 分母不再做减法，
+//     与上游数据总数（1845）完全一致；改为在列表徽章 + 侧栏提示里说明原因
+//   · 新增：一键重置（清空本站进度）—— 必须经过 window.confirm 二次确认，
+//     执行后 12 秒内还能点右下角「撤销」找回
+//   · 新增：导入支持「覆盖导入」—— 先清空本站进度再按文件重建，
+//     解决「首页数字比导出文件多」的历史遗留勾选
 // ============================================================
 
 let currentUid = null;
@@ -54,7 +61,9 @@ let currentSearchKeys = [];
 // UIAF 规范：无法识别完成时间时使用的占位值（253402271999 秒 = 9999-12-31 23:59:59）
 const UIAF_SENTINEL = 253402271999;
 
-// 当前版本暂时无法达成的成就（不计入「可完成」分母）
+// 当前版本暂时无法达成的成就
+// 说明：这些条目**仍计入总分母**（与上游数据条数保持一致），
+//       只在列表徽章和侧栏提示里标注「当前版本无法完成」，提醒原因即可。
 // ⚠️ 每次版本更新后请复核这份名单
 const BLOCKED = {
   '80507': '需至冬末期才可达成',
@@ -1075,7 +1084,7 @@ function renderAchievements(filterText = '') {
         const badges =
           (item.v ? `<span class="badge badge-new">${item.v}新增</span>` : '') +
           (item.hidden ? '<span class="badge badge-hidden">隐藏</span>' : '') +
-          (blocked ? `<span class="badge badge-blocked" title="${BLOCKED[item.key]}">暂不可完成</span>` : '') +
+          (blocked ? `<span class="badge badge-blocked" title="当前版本无法完成：${BLOCKED[item.key]}">当前版本无法完成</span>` : '') +
           (item.reward ? `<span class="badge badge-reward">${item.reward}</span>` : '');
         const guideUrl = 'https://www.bing.com/search?q=' + encodeURIComponent(`原神 成就 攻略 ${item.name}`);
         inner += `<div class="achievement-item${isDone ? ' completed' : ''}${blocked ? ' blocked' : ''}">
@@ -1287,14 +1296,41 @@ function updateCategoryUI(card) {
   }
 }
 
+// ========== 一键重置（清空本站进度） ==========
+// 只清这台设备这个浏览器里的进度，不碰游戏数据。
+// 两道保险：先 window.confirm 二次确认；执行后 12 秒内可点「撤销」还原。
+function resetProgress() {
+  if (!currentUid) return;
+  const data = userAchievements[currentUid] || {};
+  const count = Object.keys(data).length;
+  const ok = window.confirm(
+    `确定要重置 UID ${currentUid} 在本站的成就进度吗？\n\n` +
+    `· 将清空本站记录的 ${count} 条「已完成」标记和完成时间\n` +
+    `· 只影响这台设备的这个浏览器，游戏里的成就不受任何影响\n` +
+    `· 重置后可以重新导入 UIAF 文件恢复\n` +
+    `· 建议先「导出备份（JSON）」留一份底\n\n` +
+    `点「确定」继续，点「取消」放弃。（确定后 12 秒内还能点右下角「撤销」找回）`
+  );
+  if (!ok) return;
+
+  snapshot('一键重置（清空本站进度）');
+  userAchievements[currentUid] = {};
+  doneTimes = {};
+  persist();
+  renderAchievements();
+  updateStats();
+  showToast(`已重置：清空了 ${count} 条进度`);
+}
+
 // ========== 更新统计 ==========
 function updateStats() {
   const stats = calcStats(userAchievements[currentUid] || {});
 
-  document.getElementById('stats-completed').textContent = stats.completedObtainable;
-  document.getElementById('stats-total').textContent = stats.obtainable;
-  document.getElementById('stats-percent').textContent = `${pct(stats.completedObtainable, stats.obtainable)}%`;
-  document.getElementById('stats-progress').style.width = `${pct(stats.completedObtainable, stats.obtainable)}%`;
+  // 分母 = 全部成就（含「当前版本无法完成」的条目），与上游数据总数完全一致
+  document.getElementById('stats-completed').textContent = stats.completed;
+  document.getElementById('stats-total').textContent = stats.total;
+  document.getElementById('stats-percent').textContent = `${pct(stats.completed, stats.total)}%`;
+  document.getElementById('stats-progress').style.width = `${pct(stats.completed, stats.total)}%`;
 
   // 原石统计 / 版本信息（动态注入节点，不改 index.html）
   const card = document.querySelector('.stats-card');
@@ -1316,8 +1352,20 @@ function updateStats() {
   const tipEl = document.getElementById('stats-tip');
   if (tipEl) {
     tipEl.textContent = stats.blockedCount > 0
-      ? `共 ${stats.total} 个成就，其中 ${stats.blockedCount} 个当前版本暂不可完成，未计入上方分母`
+      ? `共 ${stats.total} 个成就，其中 ${stats.blockedCount} 个当前版本无法完成（条件尚未开放，已一并计入上方分母）`
       : `已收录全部 ${stats.total} 个成就`;
+  }
+
+  // 一键重置按钮（清空当前账号在本站的进度）—— 需二次确认，12 秒内可撤销
+  if (card && !document.getElementById('stats-reset')) {
+    const resetBtn = document.createElement('button');
+    resetBtn.id = 'stats-reset';
+    resetBtn.type = 'button';
+    resetBtn.className = 'btn-small stats-reset-btn';
+    resetBtn.textContent = '重置本站进度';
+    resetBtn.title = '清空当前账号在本站勾选的全部「已完成」标记与完成时间';
+    resetBtn.addEventListener('click', resetProgress);
+    card.appendChild(resetBtn);
   }
 
   const catStatsDiv = document.getElementById('category-stats');
@@ -1544,7 +1592,7 @@ function initSearch() {
           html += `<div class="search-result-item${isDone ? ' completed' : ''}">
             <input type="checkbox" ${isDone ? 'checked' : ''} data-key="${r.key}">
             <div style="flex:1;min-width:0;">
-              <div class="search-result-name">${r.name}${r.v ? `<span class="badge badge-new">${r.v}新增</span>` : ''}${r.hidden ? '<span class="badge badge-hidden">隐藏</span>' : ''}${blocked ? '<span class="badge badge-blocked">暂不可完成</span>' : ''}</div>
+              <div class="search-result-name">${r.name}${r.v ? `<span class="badge badge-new">${r.v}新增</span>` : ''}${r.hidden ? '<span class="badge badge-hidden">隐藏</span>' : ''}${blocked ? '<span class="badge badge-blocked">当前版本无法完成</span>' : ''}</div>
               <div class="search-result-desc">${r.desc}</div>
             </div>
             <span class="search-result-category">${r.category}</span>
@@ -1584,7 +1632,8 @@ function buildExportText() {
   text += `UID: ${currentUid}\n`;
   text += `导出时间: ${new Date().toLocaleString('zh-CN')}\n`;
   if (meta) text += `数据版本: ${meta.gameVersion}「${meta.gameVersionName}」(上游 ${meta.sourceUpdatedAt})\n`;
-  text += `总进度: ${stats.completedObtainable}/${stats.obtainable} (${pct(stats.completedObtainable, stats.obtainable)}%)\n`;
+  text += `总进度: ${stats.completed}/${stats.total} (${pct(stats.completed, stats.total)}%)\n`;
+  if (stats.blockedCount > 0) text += `说明: 共 ${stats.total} 个成就，其中 ${stats.blockedCount} 个当前版本无法完成（已计入分母）\n`;
   text += `原石: ${stats.rewardDone}/${stats.rewardTotal}\n`;
   text += `========================\n\n`;
 
@@ -1681,7 +1730,7 @@ function uiafTime(t) {
 function planUIAF(payload) {
   const known = knownKeySet();
   const data = userAchievements[currentUid] || {};
-  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [] };
+  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [], finishedIds: [] };
   for (const rec of payload.list) {
     if (!rec || rec.id === undefined || rec.id === null) continue;
     plan.total++;
@@ -1690,8 +1739,10 @@ function planUIAF(payload) {
     const st = Number(rec.status);
     if (st === 2 || st === 3) {           // 2 = 已完成，3 = 奖励已领取，都算完成
       plan.finished++;
+      const pair = [id, uiafTime(rec.timestamp)];
+      plan.finishedIds.push(pair);        // 覆盖导入时按这份完整清单重建
       if (data[id]) plan.kept++;
-      else { plan.add++; plan.ids.push([id, uiafTime(rec.timestamp)]); }
+      else { plan.add++; plan.ids.push(pair); }
     } else {
       plan.unfinished++;
     }
@@ -1707,7 +1758,7 @@ function planBackup(payload) {
   const known = knownKeySet();
   const map = window.LEGACY_KEY_MAP || {};
   const data = userAchievements[currentUid] || {};
-  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [], fixed: 0 };
+  const plan = { total: 0, finished: 0, unfinished: 0, add: 0, kept: 0, unknown: [], ids: [], finishedIds: [], fixed: 0 };
   for (const k of Object.keys(incoming)) {
     plan.total++;
     const nk = map[k] || k;
@@ -1715,8 +1766,10 @@ function planBackup(payload) {
     if (!incoming[k]) { plan.unfinished++; continue; }
     plan.finished++;
     if (!known.has(nk)) { plan.unknown.push(nk); continue; }
+    const pair = [nk, Date.now()];
+    plan.finishedIds.push(pair);          // 覆盖导入时按这份完整清单重建
     if (data[nk]) plan.kept++;
-    else { plan.add++; plan.ids.push([nk, Date.now()]); }
+    else { plan.add++; plan.ids.push(pair); }
   }
   return plan;
 }
@@ -1741,7 +1794,8 @@ function openImportModal() {
             支持两种文件：
             <div class="import-opt"><b>UIAF 成就文件</b>（推荐）—— 用游戏成就导出工具生成，一次导入全部进度，还带完成时间</div>
             <div class="import-opt"><b>本站备份 JSON</b> —— 就是「导出备份」生成的那个文件</div>
-            <div class="import-tip">导入只做<b>合并</b>：补上你已完成、网站还没勾的，不会取消你已有的进度。</div>
+            <div class="import-tip">默认只做<b>合并</b>：补上你已完成、网站还没勾的，不会取消你已有的进度。<br>
+              如果首页数字比文件里的「已完成」还多（本站多勾了导出文件里没有的条目），可以勾选下面的「<b>覆盖导入</b>」把本站进度按文件重建。</div>
 
             <div class="import-guide-cta">
               <button class="btn-small guide-btn" id="import-guide-btn">具体操作流程</button>
@@ -1859,6 +1913,8 @@ function renderImportReport() {
   if (isUiaf) {
     html += `<div class="report-note">UIAF 文件本身不含 UID。请确认这份文件确实是 UID <b>${esc(currentUid)}</b> 导出的，否则进度会串号。</div>`;
   }
+  html += `<label class="import-replace"><input type="checkbox" id="import-replace">
+    <span>覆盖导入：先清空本站进度，再完全按这份文件重建（可让首页数字与文件完全一致）</span></label>`;
   html += `<button class="btn-primary report-btn" id="confirm-import">${plan.add ? `确认导入（新增 ${plan.add} 条）` : '确认导入'}</button>`;
 
   rep.innerHTML = html;
@@ -1870,10 +1926,27 @@ function applyPendingImport() {
   if (!pendingImport) return;
   const { kind, plan } = pendingImport;
   const isUiaf = kind === 'uiaf';
-  const applied = plan.add;
+  const replaceBox = document.getElementById('import-replace');
+  const replace = !!(replaceBox && replaceBox.checked);
 
-  snapshot(isUiaf ? '导入 UIAF' : '导入备份');
-  for (const pair of plan.ids) setDone(pair[0], true, pair[1]);
+  let applied = plan.add;
+  if (replace) {
+    // 覆盖导入：先清空，再按文件里的完整已完成清单重建
+    const before = Object.keys(userAchievements[currentUid] || {}).length;
+    const ok = window.confirm(
+      `确定要「覆盖导入」吗？\n\n` +
+      `· 会先清空本站当前账号的 ${before} 条进度，再用这份文件重建\n` +
+      `· 文件里没提到的成就（包括你手动勾的）都会被清掉\n` +
+      `· 操作不可撤销，建议先「导出备份（JSON）」留底\n\n` +
+      `点「确定」执行覆盖导入，点「取消」返回。`
+    );
+    if (!ok) return;
+    applied = (plan.finishedIds || []).length;
+  }
+
+  snapshot(replace ? '覆盖导入（先清空）' : (isUiaf ? '导入 UIAF' : '导入备份'));
+  if (replace) { userAchievements[currentUid] = {}; doneTimes = {}; }
+  for (const pair of (replace ? (plan.finishedIds || []) : plan.ids)) setDone(pair[0], true, pair[1]);
   persist();
   pendingImport = null;
 
@@ -1882,15 +1955,19 @@ function applyPendingImport() {
 
   const rep = document.getElementById('import-report');
   if (rep) {
-    rep.innerHTML = `<div class="report-title">导入完成</div>
-      <div class="report-line">新增 <b>${applied}</b> 条已完成记录${plan.kept ? `，${plan.kept} 条保持原样` : ''}${plan.unknown.length ? `，跳过 ${plan.unknown.length} 条本站未收录` : ''}。</div>
+    rep.innerHTML = `<div class="report-title">导入完成${replace ? '（覆盖）' : ''}</div>
+      <div class="report-line">${replace
+        ? `已清空旧进度，按文件重建 <b>${applied}</b> 条已完成记录`
+        : `新增 <b>${applied}</b> 条已完成记录${plan.kept ? `，${plan.kept} 条保持原样` : ''}`}${plan.unknown.length ? `，跳过 ${plan.unknown.length} 条本站未收录` : ''}。</div>
       <div class="report-line">左侧进度条已经更新。</div>
       <button class="btn-small report-btn" id="close-import-after">关闭</button>`;
     const b = rep.querySelector('#close-import-after');
     if (b) b.addEventListener('click', () => { document.getElementById('import-modal').style.display = 'none'; });
   }
 
-  showToast(`已从${isUiaf ? ' UIAF ' : '备份'}导入 ${applied} 条已完成记录`);
+  showToast(replace
+    ? `已覆盖导入 ${applied} 条已完成记录`
+    : `已从${isUiaf ? ' UIAF ' : '备份'}导入 ${applied} 条已完成记录`);
 }
 
 // 导入操作流程说明 —— 弹窗版（原先是 window.alert，一长串文字很难读）
