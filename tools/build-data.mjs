@@ -11,6 +11,7 @@
  *   - 保留旧的 LEGACY_KEY_MAP，让还没迁移过的浏览器仍能自动转换旧进度
  *   - 新增合辑需要在下面的 ICONS 里补一个图标，否则用默认 🏆
  *   - generatedAt 只在数据真正变化时才刷新，保证「无变化 → 零提交」
+ *   - EXCLUDE_IDS 里的 id 会被剔除（游戏里不存在/从未实装的条目，避免多算分母）
  *
  * 版本标记（哪些成就是哪个版本新增的）——自给自足，不依赖额外文件：
  *   - 基线 = LEGACY_KEY_MAP 的全部 value（即 6.8 时代的 1759 个 id）
@@ -30,6 +31,15 @@ const OUT = path.join(ROOT, 'data.js');
 const UPSTREAM = 'dvaJi/genshin-data';
 const BRANCH = 'master';
 const LANG_DIR = 'src/data/chinese-simplified/achievements';
+
+// 游戏里不存在 / 从未实装、但上游数据源仍保留的成就 id —— 构建时直接剔除，
+// 否则会污染总分母与总数，用户拿游戏内成就数一对就会发现"多了一条"。
+// 84517「善事有善报」（拆穿玛乔丽小姐，并获得杰克的答谢）：
+//   · 游戏成就表里根本没有这个 id（玩家导出里 84516/84518/84519 都在，唯独它出现 0 次）
+//   · 长期被社区列为"存疑成就 / 未见达成报告 / 疑似废止"
+//   · 剔除后：1845 → 1844 项、天地万象 985 → 984、原石 14030 → 14025，
+//     与 B站 wiki / Fandom / TapTap 的权威口径（1844 项 / 14025 原石）完全一致
+const EXCLUDE_IDS = new Set(['84517']);
 
 const ICONS = {
   '天地万象': '🌍',
@@ -212,12 +222,18 @@ function buildBody({ albums, gameVersion, gameVersionName, dataVersion, commitDa
   const total = albums.reduce((a, x) => a + x.items.length, 0);
   const totalReward = albums.reduce((a, x) => a + x.items.reduce((y, i) => y + (i.reward || 0), 0), 0);
 
+  // 剔除说明写进文件头（由 EXCLUDE_IDS 推导，保证脚本产物与 data.js 永远一致）
+  const exclNote = EXCLUDE_IDS.size
+    ? `// 已剔除: ${[...EXCLUDE_IDS].join(', ')} —— 游戏内从未实装（上游数据源仍保留该条目）\n`
+      + `//         剔除名单见 tools/build-data.mjs 的 EXCLUDE_IDS\n`
+    : '';
+
   const head = `// 原神成就数据库（由 tools/build-data.mjs 自动生成，请勿手工修改）
 // 数据来源: ${UPSTREAM} (release ${dataVersion || '?'})
 // 游戏版本: ${gameVersion || '（未知，请手动补）'}${gameVersionName ? '「' + gameVersionName + '」' : ''}
 // 上游更新时间: ${commitDate}
 // 生成时间: ${generatedAt}
-// 成就总数: ${total} 项 / ${albums.length} 个合辑 / ${totalReward} 原石
+${exclNote}// 成就总数: ${total} 项 / ${albums.length} 个合辑 / ${totalReward} 原石
 `;
   const body = [];
   body.push('ACHIEVEMENTS_META = {');
@@ -257,6 +273,9 @@ function buildBody({ albums, gameVersion, gameVersionName, dataVersion, commitDa
   body.push('};');
   body.push('');
   body.push('// 旧数据（索引式 key）→ 新数据（稳定 id）的一次性迁移表');
+  body.push('// ⚠️ 本表刻意保持"原始快照"、只继承不重算：它是旧版站点的第 N 项 → 当时那个 id 的对应关系。');
+  body.push('//    所以即使某个 id 后来进了 EXCLUDE_IDS（如 84517），这里也必须继续映射到**它自己**——');
+  body.push('//    否则把 711 改指到 84518，用户在那个位置上的旧勾选就会被"平移"到一个真实成就上，凭空多算 1 个。');
   body.push('// 所有浏览器都完成一次迁移后，这段可以删掉');
   body.push('const LEGACY_KEY_MAP = ' + JSON.stringify(legacy) + ';');
   body.push('');
@@ -280,7 +299,8 @@ async function main() {
   const results = await pool(files, async (f) => {
     try {
       const j = await getJSON(f.path);
-      const items = Object.keys(j.achievements).map(k => j.achievements[k]);
+      const items = Object.keys(j.achievements).map(k => j.achievements[k])
+        .filter(it => !EXCLUDE_IDS.has(String(it.id)));
       items.sort((a, b) => (a.order - b.order) || (a.id - b.id));
       return { ok: true, album: { _id: j._id, name: j.name, items } };
     } catch (e) { return { ok: false, name: f.name, err: e.message }; }
