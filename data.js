@@ -1,20 +1,20 @@
 // 原神成就数据库（由 tools/build-data.mjs 自动生成，请勿手工修改）
-// 数据来源: dvaJi/genshin-data (release 0.62.0)
-// 游戏版本: 7.0「无神怜爱的雪国」
-// 上游更新时间: 2026-08-11
-// 生成时间: 2026-09-21
+// 数据来源: dvaJi/genshin-data (release 0.63.0)
+// 游戏版本: （未知，请手动补）「无神怜爱的雪国」
+// 上游更新时间: 2026-09-30
+// 生成时间: 2026-10-02
 // 已剔除: 84517 —— 游戏内从未实装（上游数据源仍保留该条目）
 //         剔除名单见 tools/build-data.mjs 的 EXCLUDE_IDS
-// 成就总数: 1844 项 / 73 个合辑 / 14025 原石
+// 成就总数: 1854 项 / 73 个合辑 / 14085 原石
 ACHIEVEMENTS_META = {
-  gameVersion: "7.0",
+  gameVersion: "",
   gameVersionName: "无神怜爱的雪国",
-  dataVersion: "0.62.0",
+  dataVersion: "0.63.0",
   source: "dvaJi/genshin-data",
-  sourceUpdatedAt: "2026-08-11",
-  generatedAt: "2026-09-21",
-  total: 1844,
-  totalReward: 14025
+  sourceUpdatedAt: "2026-09-30",
+  generatedAt: "2026-10-02",
+  total: 1854,
+  totalReward: 14085
 };
 
 const ACHIEVEMENTS = {
@@ -627,6 +627,7 @@ const ACHIEVEMENTS = {
         { key: "81729", name: "科斯基，方案", desc: "帮助纳塔人，令她的浮燃鸟伙伴冷静下来。", reward: 5, hidden: true, v: "7.0", order: 1729 },
         { key: "81730", name: "如我的想象顺我目光凝固", desc: "靠近灯塔上，少女的幽影凝结成的雕像。", reward: 5, hidden: true, v: "7.0", order: 1730 },
         { key: "81731", name: "戴醉之身", desc: "你永远可以叫醒一个真醉的人。", reward: 5, hidden: true, v: "7.0", order: 1731 },
+        { key: "81732", name: "冬夜来信", desc: "完成「冰宫密令·其一」。", reward: 5, hidden: false, order: 1732 },
         { key: "82008", name: "无坚不摧", desc: "在无相之岩复苏前，击碎所有复苏岩柱。", reward: 10, hidden: true, order: 2008 },
         { key: "82009", name: "棱镜计划", desc: "在无相之雷复苏前，摧毁所有复苏棱镜。", reward: 10, hidden: true, order: 2009 },
         { key: "82010", name: "「这风晶蝶还蛮大的」", desc: "在无相之风复苏前，吸收所有风之晶球。", reward: 10, hidden: true, order: 2010 },
@@ -730,6 +731,7 @@ const ACHIEVEMENTS = {
         { key: "82309", name: "「不要打破那面墙」", desc: "规避壁障的束缚，瓦解多托雷构筑的囚牢之境。", reward: 5, hidden: true, order: 2309 },
         { key: "82310", name: "等一下…就是现在！", desc: "在不灭衍生造物处于「命耀之姿」状态时，通过击破复生护盾，打断其攻击。", reward: 5, hidden: true, v: "7.0", order: 2310 },
         { key: "82311", name: "「骏狮坠落」", desc: "在嵌合翼骏狮处于「驱风」状态时，通过击破全部的风球，将其击落。", reward: 5, hidden: true, v: "7.0", order: 2311 },
+        { key: "82312", name: "「热情如火」", desc: "在仅使用火元素攻击的情况下，破除游雪的护刃的「冰棺」。", reward: 5, hidden: true, order: 2312 },
         { key: "84000", name: "漫长旅途的开端", desc: "完成蒙德的魔神任务。", reward: 20, hidden: true, order: 4001 },
         { key: "84001", name: "捕风的异乡人", desc: "完成「捕风的异乡人」。", reward: 10, hidden: true, order: 4002 },
         { key: "84002", name: "为了没有眼泪的明天", desc: "完成「为了没有眼泪的明天」。", reward: 10, hidden: true, order: 4003 },
@@ -1006,6 +1008,14 @@ const ACHIEVEMENTS = {
         { key: "84396", name: "闭环之外", desc: "见证米提亚主动踏入暴风雪。", reward: 5, hidden: true, v: "7.0", order: 5171 },
         { key: "84397", name: "「命运」的三种死亡", desc: "从「死后世界」中幸存下来。", reward: 5, hidden: true, v: "7.0", order: 5172 },
         { key: "84398", name: "死魂灵的夜曲", desc: "完成「死魂灵的夜曲」。", reward: 10, hidden: true, v: "7.0", order: 5173 },
+        { key: "84399", name: "制胜的决定因素", desc: "与达妮卡在最好玩的「摩拉游戏」中展开较量。", reward: 5, hidden: true, order: 5174 },
+        { key: "84400", name: "尘世七执政", desc: "结识了统治提瓦特尘世的全部七位…或是八位神明。", reward: 5, hidden: true, order: 5175 },
+        { key: "84401", name: "生者必灭之理", desc: "击败生之执政制造出的魔物。", reward: 5, hidden: true, order: 5176 },
+        { key: "84402", name: "白夜似梦初醒", desc: "完成「白夜似梦初醒」。", reward: 10, hidden: true, order: 5177 },
+        { key: "84403", name: "树下的九日九夜", desc: "在「丑角」的记忆中见到尚未成为「贤者」的海洛塔帝。", reward: 5, hidden: true, order: 5178 },
+        { key: "84404", name: "四个人的茶会", desc: "在大战到来前度过了久违的惬意时光…", reward: 5, hidden: true, order: 5179 },
+        { key: "84405", name: "随尽末到来的毁灭", desc: "击败「死之执政」若娜瓦。", reward: 5, hidden: true, order: 5180 },
+        { key: "84406", name: "往冥府的安魂歌", desc: "完成「往冥府的安魂歌」。", reward: 10, hidden: true, order: 5181 },
         { key: "84155", name: "途中的见闻", desc: "见证一次逸闻。", reward: 5, hidden: true, order: 7900 }
       ]
     }
@@ -2413,7 +2423,7 @@ const ACHIEVEMENTS = {
         { key: "86074", name: "滑铲瞄准根本就是天方夜谭", desc: "在滑铲状态下累计击败20名敌人。", reward: 5, hidden: false, v: "7.0", order: 9071 },
         { key: "86075", name: "链接着所有人的神圣光矛", desc: "获得突击步枪：「莎塔娜娅的苍银」。", reward: 5, hidden: false, v: "7.0", order: 9072 },
         { key: "86076", name: "百般武艺，此乃榴弹发射器！", desc: "获得榴弹发射器：「瓦尔萨格的日轮」。", reward: 5, hidden: false, v: "7.0", order: 9073 },
-        { key: "86077", name: "警告，闪电灾厄正在生成…", desc: "获得突击步枪：「阿夏梅兹的千光」", reward: 5, hidden: false, v: "7.0", order: 9074 },
+        { key: "86077", name: "警告，闪电灾厄正在生成…", desc: "获得突击步枪：「阿夏梅兹的千光」。", reward: 5, hidden: false, v: "7.0", order: 9074 },
         { key: "86078", name: "500克的爱", desc: "获得榴晶。", reward: 5, hidden: false, v: "7.0", order: 9075 }
       ]
     }
