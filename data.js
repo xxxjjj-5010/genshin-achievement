@@ -1,18 +1,18 @@
 // 原神成就数据库（由 tools/build-data.mjs 自动生成，请勿手工修改）
-// 数据来源: dvaJi/genshin-data (release 0.63.0)
+// 数据来源: dvaJi/genshin-data (release 0.63.2)
 // 游戏版本: （未知，请手动补）「无神怜爱的雪国」
-// 上游更新时间: 2026-09-30
-// 生成时间: 2026-10-02
+// 上游更新时间: 2026-10-29
+// 生成时间: 2026-10-29
 // 已剔除: 84517 —— 游戏内从未实装（上游数据源仍保留该条目）
 //         剔除名单见 tools/build-data.mjs 的 EXCLUDE_IDS
 // 成就总数: 1854 项 / 73 个合辑 / 14085 原石
 ACHIEVEMENTS_META = {
   gameVersion: "",
   gameVersionName: "无神怜爱的雪国",
-  dataVersion: "0.63.0",
+  dataVersion: "0.63.2",
   source: "dvaJi/genshin-data",
-  sourceUpdatedAt: "2026-09-30",
-  generatedAt: "2026-10-02",
+  sourceUpdatedAt: "2026-10-29",
+  generatedAt: "2026-10-29",
   total: 1854,
   totalReward: 14085
 };
