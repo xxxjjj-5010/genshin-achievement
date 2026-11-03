@@ -1,20 +1,20 @@
 // 原神成就数据库（由 tools/build-data.mjs 自动生成，请勿手工修改）
-// 数据来源: dvaJi/genshin-data (release 0.63.2)
+// 数据来源: dvaJi/genshin-data (release 0.64.0)
 // 游戏版本: （未知，请手动补）「无神怜爱的雪国」
-// 上游更新时间: 2026-10-29
-// 生成时间: 2026-10-29
+// 上游更新时间: 2026-11-03
+// 生成时间: 2026-11-03
 // 已剔除: 84517 —— 游戏内从未实装（上游数据源仍保留该条目）
 //         剔除名单见 tools/build-data.mjs 的 EXCLUDE_IDS
-// 成就总数: 1854 项 / 73 个合辑 / 14085 原石
+// 成就总数: 1909 项 / 75 个合辑 / 14455 原石
 ACHIEVEMENTS_META = {
   gameVersion: "",
   gameVersionName: "无神怜爱的雪国",
-  dataVersion: "0.63.2",
+  dataVersion: "0.64.0",
   source: "dvaJi/genshin-data",
-  sourceUpdatedAt: "2026-10-29",
-  generatedAt: "2026-10-29",
-  total: 1854,
-  totalReward: 14085
+  sourceUpdatedAt: "2026-11-03",
+  generatedAt: "2026-11-03",
+  total: 1909,
+  totalReward: 14455
 };
 
 const ACHIEVEMENTS = {
@@ -628,6 +628,24 @@ const ACHIEVEMENTS = {
         { key: "81730", name: "如我的想象顺我目光凝固", desc: "靠近灯塔上，少女的幽影凝结成的雕像。", reward: 5, hidden: true, v: "7.0", order: 1730 },
         { key: "81731", name: "戴醉之身", desc: "你永远可以叫醒一个真醉的人。", reward: 5, hidden: true, v: "7.0", order: 1731 },
         { key: "81732", name: "冬夜来信", desc: "完成「冰宫密令·其一」。", reward: 5, hidden: false, order: 1732 },
+        { key: "81733", name: "行走的话语", desc: "在见闻笔记中记录了至冬大陆东侧的过往故事。", reward: 5, hidden: true, order: 1733 },
+        { key: "81734", name: "晶石的裂响", desc: "在见闻笔记中记录了新基捷城事件的所有内容。", reward: 5, hidden: true, order: 1734 },
+        { key: "81735", name: "黄金矿工", desc: "第一次破坏晶矿伴生岩块。", reward: 5, hidden: true, order: 1735 },
+        { key: "81736", name: "地壳空洞制造者", desc: "破坏了巨量的晶矿伴生岩块。", reward: 5, hidden: true, order: 1736 },
+        { key: "81738", name: "米约尔尼尔？", desc: "投掷臻冰造物·矿镐以破坏远处的岩块。", reward: 5, hidden: true, order: 1738 },
+        { key: "81739", name: "比魔杖好使多了…", desc: "第一次操纵速射机炮。", reward: 5, hidden: true, order: 1739 },
+        { key: "81740", name: "旧城双杰", desc: "击败了旧基捷城被侵蚀了的两位守城者。", reward: 5, hidden: true, order: 1740 },
+        { key: "81741", name: "褪色的冰影", desc: "那重新塑造一切的方式也许早有原型…", reward: 5, hidden: true, order: 1741 },
+        { key: "81742", name: "极速通勤传说", desc: "在新基捷城的市区内快速移动。", reward: 5, hidden: true, order: 1742 },
+        { key: "81743", name: "明珠拭尘故事集", desc: "售卖了所有发掘出的寄卖物…", reward: 5, hidden: true, order: 1743 },
+        { key: "81744", name: "隐秘已逝", desc: "发现并点亮了所有古代妖精的秘密语。", reward: 5, hidden: true, order: 1744 },
+        { key: "81745", name: "晶矿如流之城", desc: "抵达妖精与晶矿的都市——新基捷城。", reward: 5, hidden: true, order: 1745 },
+        { key: "81746", name: "使水得到医治", desc: "解决了新基捷城地下水源断流的难题。", reward: 5, hidden: true, order: 1746 },
+        { key: "81747", name: "VR战警…", desc: "乘坐矿车，自影域中成功脱身。", reward: 5, hidden: true, order: 1747 },
+        { key: "81749", name: "灾厄如黑雪消融", desc: "消除冰原上两条裂谷之中的厄生晶矿。", reward: 5, hidden: true, order: 1749 },
+        { key: "81753", name: "映照死亡的厅堂", desc: "抵达如翼的山峰之中，巨兽陨骨之底。", reward: 5, hidden: true, order: 1753 },
+        { key: "81755", name: "特使驾到", desc: "完成「冰宫密令·其二」。", reward: 5, hidden: false, order: 1755 },
+        { key: "81756", name: "铁树开花", desc: "令晶矿之树得以在暗无天日处成长。", reward: 5, hidden: true, order: 1756 },
         { key: "82008", name: "无坚不摧", desc: "在无相之岩复苏前，击碎所有复苏岩柱。", reward: 10, hidden: true, order: 2008 },
         { key: "82009", name: "棱镜计划", desc: "在无相之雷复苏前，摧毁所有复苏棱镜。", reward: 10, hidden: true, order: 2009 },
         { key: "82010", name: "「这风晶蝶还蛮大的」", desc: "在无相之风复苏前，吸收所有风之晶球。", reward: 10, hidden: true, order: 2010 },
@@ -732,6 +750,7 @@ const ACHIEVEMENTS = {
         { key: "82310", name: "等一下…就是现在！", desc: "在不灭衍生造物处于「命耀之姿」状态时，通过击破复生护盾，打断其攻击。", reward: 5, hidden: true, v: "7.0", order: 2310 },
         { key: "82311", name: "「骏狮坠落」", desc: "在嵌合翼骏狮处于「驱风」状态时，通过击破全部的风球，将其击落。", reward: 5, hidden: true, v: "7.0", order: 2311 },
         { key: "82312", name: "「热情如火」", desc: "在仅使用火元素攻击的情况下，破除游雪的护刃的「冰棺」。", reward: 5, hidden: true, order: 2312 },
+        { key: "82313", name: "其饮尚温…", desc: "在浪涛锚定者处于奋勇状态时，将其击败…", reward: 5, hidden: true, order: 2313 },
         { key: "84000", name: "漫长旅途的开端", desc: "完成蒙德的魔神任务。", reward: 20, hidden: true, order: 4001 },
         { key: "84001", name: "捕风的异乡人", desc: "完成「捕风的异乡人」。", reward: 10, hidden: true, order: 4002 },
         { key: "84002", name: "为了没有眼泪的明天", desc: "完成「为了没有眼泪的明天」。", reward: 10, hidden: true, order: 4003 },
@@ -1016,7 +1035,20 @@ const ACHIEVEMENTS = {
         { key: "84404", name: "四个人的茶会", desc: "在大战到来前度过了久违的惬意时光…", reward: 5, hidden: true, order: 5179 },
         { key: "84405", name: "随尽末到来的毁灭", desc: "击败「死之执政」若娜瓦。", reward: 5, hidden: true, order: 5180 },
         { key: "84406", name: "往冥府的安魂歌", desc: "完成「往冥府的安魂歌」。", reward: 10, hidden: true, order: 5181 },
-        { key: "84155", name: "途中的见闻", desc: "见证一次逸闻。", reward: 5, hidden: true, order: 7900 }
+        { key: "84407", name: "震怒之日", desc: "调查判罚之钉的异动。", reward: 5, hidden: true, order: 5182 },
+        { key: "84408", name: "存在于此的理由", desc: "从「无恒预设应答终端」处获取必要的情报。", reward: 5, hidden: true, order: 5183 },
+        { key: "84409", name: "坏灭肇始之时", desc: "完成「坏灭肇始之时」。", reward: 10, hidden: true, order: 5184 },
+        { key: "84410", name: "吹向自由的流风", desc: "完成有关「自由」的「僭续试炼」。", reward: 5, hidden: true, order: 5185 },
+        { key: "84411", name: "维系永恒的意志", desc: "完成有关「永恒」的「僭续试炼」。", reward: 5, hidden: true, order: 5186 },
+        { key: "84412", name: "「智慧」没有答案", desc: "完成有关「智慧」的「僭续试炼」。", reward: 5, hidden: true, order: 5187 },
+        { key: "84413", name: "胜利缔造的宝物", desc: "完成有关「战争」的「僭续试炼」。", reward: 5, hidden: true, order: 5188 },
+        { key: "84414", name: "并非爱的诅咒", desc: "完成有关「慈爱」的「僭续试炼」。", reward: 5, hidden: true, order: 5189 },
+        { key: "84415", name: "寄自彼岸的昨日", desc: "完成「寄自彼岸的昨日」。", reward: 10, hidden: true, order: 5190 },
+        { key: "84155", name: "途中的见闻", desc: "见证一次逸闻。", reward: 5, hidden: true, order: 7900 },
+        { key: "86115", name: "穿花衣的吹笛人", desc: "呀吼，呀吼，呀吼，呀吼…", reward: 5, hidden: true, order: 9112 },
+        { key: "86116", name: "密米尔之泉", desc: "拿走你想要的吧，只要你付得起它的价格…", reward: 5, hidden: true, order: 9113 },
+        { key: "86117", name: "拳王", desc: "在猜拳游戏中取得最后的胜利。", reward: 5, hidden: true, order: 9114 },
+        { key: "86118", name: "拾者归还", desc: "将属于每个人的东西，归还给每个人。", reward: 5, hidden: true, order: 9115 }
       ]
     }
   },
@@ -2405,11 +2437,11 @@ const ACHIEVEMENTS = {
       ]
     }
   },
-  "浮涌的阴影之地": {
-    icon: "🌫️",
+  "浮涌的阴影之地·其之一": {
+    icon: "🏆",
     order: 70,
     children: {
-      "浮涌的阴影之地": [
+      "浮涌的阴影之地·其之一": [
         { key: "86059", name: "冻原的修复师", desc: "在至冬冻土清剿一个大型影域。", reward: 10, hidden: false, v: "7.0", order: 9056 },
         { key: "86062", name: "我们影域里见", desc: "完成一次「绝境攻炼」的挑战。", reward: 10, hidden: false, v: "7.0", order: 9059 },
         { key: "86063", name: "「影域老司机」", desc: "将「影域解析等级」提升至满级。", reward: 10, hidden: false, v: "7.0", order: 9060 },
@@ -2453,6 +2485,45 @@ const ACHIEVEMENTS = {
         { key: "86085", name: "独生无明", desc: "与其他玩家一同战胜多托雷。", reward: 10, hidden: false, v: "7.0", order: 9082 },
         { key: "86086", name: "不灭已斩", desc: "与其他玩家一同战胜不灭衍生造物。", reward: 10, hidden: false, v: "7.0", order: 9083 },
         { key: "86087", name: "生生有息", desc: "与其他玩家一同战胜嵌合翼骏狮。", reward: 10, hidden: false, v: "7.0", order: 9084 }
+      ]
+    }
+  },
+  "至冬·冰与苍星的圣都·其之二": {
+    icon: "🏆",
+    order: 73,
+    children: {
+      "至冬·冰与苍星的圣都·其之二": [
+        { key: "86092", name: "大地勘探·朔雪覆降之国·其二", desc: "点亮至冬区域中，新基捷城、如翼之峰的地图。", reward: 5, hidden: false, order: 9089 },
+        { key: "86093", name: "凌越冰封的雪境·其二", desc: "解锁至冬区域中，新基捷城、如翼之峰所有传送锚点。", reward: 5, hidden: false, order: 9090 },
+        { key: "86094", name: "圣龛巡礼·朔雪覆降之国·其二", desc: "解除至冬区域中，新基捷城、如翼之峰所有地灵龛的封印。", reward: 10, hidden: false, order: 9091 },
+        { key: "86095", name: "影域馈赐·朔雪覆降之国·其二", desc: "解除至冬区域中，新基捷城、如翼之峰所有影域遗物宝库的封印。", reward: 10, hidden: false, order: 9092 },
+        { key: "86096", name: "霜原引路人·其二", desc: "在新基捷城、如翼之峰追随4个仙灵，并点亮仙灵之庭。", reward: 5, hidden: false, order: 9093 },
+        { key: "86097", name: "霜原引路人·其二", desc: "在新基捷城、如翼之峰追随9个仙灵，并点亮仙灵之庭。", reward: 10, hidden: false, order: 9094 },
+        { key: "86098", name: "霜原引路人·其二", desc: "在新基捷城、如翼之峰追随18个仙灵，并点亮仙灵之庭。", reward: 20, hidden: false, order: 9095 },
+        { key: "86099", name: "寒冬的寻宝者·其二", desc: "在新基捷城、如翼之峰开启45个宝箱。", reward: 5, hidden: false, order: 9096 },
+        { key: "86100", name: "寒冬的寻宝者·其二", desc: "在新基捷城、如翼之峰开启90个宝箱。", reward: 10, hidden: false, order: 9097 },
+        { key: "86101", name: "寒冬的寻宝者·其二", desc: "在新基捷城、如翼之峰开启180个宝箱。", reward: 20, hidden: false, order: 9098 },
+        { key: "86102", name: "寒冬的冒险家·其二", desc: "在新基捷城、如翼之峰完成3个大世界限时挑战。", reward: 5, hidden: false, order: 9099 },
+        { key: "86103", name: "寒冬的冒险家·其二", desc: "在新基捷城、如翼之峰完成7个大世界限时挑战。", reward: 10, hidden: false, order: 9100 },
+        { key: "86104", name: "寒冬的冒险家·其二", desc: "在新基捷城、如翼之峰完成14个大世界限时挑战。", reward: 20, hidden: false, order: 9101 },
+        { key: "86105", name: "不再复活，不再彼此相见", desc: "见证了矮灵王公阿尔维斯与其女斯露德的结局。", reward: 10, hidden: false, order: 9102 },
+        { key: "86106", name: "康塔罗斯的深杯", desc: "提升「聚所·特普洛绿洲」的共建等级至满级。", reward: 5, hidden: false, order: 9103 },
+        { key: "86107", name: "黑色回声", desc: "提升「聚所·皇家轨道运输局」的共建等级至满级。", reward: 5, hidden: false, order: 9104 }
+      ]
+    }
+  },
+  "浮涌的阴影之地·其之二": {
+    icon: "🏆",
+    order: 74,
+    children: {
+      "浮涌的阴影之地·其之二": [
+        { key: "86108", name: "索斯卢科在这里", desc: "获得霰弹枪：「索斯卢科的灼炎」。", reward: 5, hidden: false, order: 9105 },
+        { key: "86109", name: "我推荐这个，您觉得呢？", desc: "获得霰弹枪：「艾维萨缇的山狩」。", reward: 5, hidden: false, order: 9106 },
+        { key: "86110", name: "城市战专家", desc: "在「绝境攻炼」的「交错锤砧」、「重兵固港」与「灾厄旧城」关卡中，每关至少获得1枚攻炼武勋。", reward: 5, hidden: false, order: 9107 },
+        { key: "86111", name: "库尔达拉冈的吐息", desc: "为「索斯卢科的灼炎」安装4个配件。", reward: 10, hidden: false, order: 9108 },
+        { key: "86112", name: "超级霰弹枪", desc: "为「艾维萨缇的山狩」安装4个配件。", reward: 10, hidden: false, order: 9109 },
+        { key: "86113", name: "开火粉碎，直到一切结束。", desc: "使用「索斯卢科的灼炎」，在15秒内连续开火10次。", reward: 5, hidden: false, order: 9110 },
+        { key: "86114", name: "尽管他并非巨人…", desc: "使用「艾维萨缇的山狩」的重型弹块，命中一名在30米以外的敌人。", reward: 5, hidden: false, order: 9111 }
       ]
     }
   }
